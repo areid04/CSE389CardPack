@@ -1,0 +1,8 @@
+{
+    "pack_name": "Music Pack Vol 1",
+    "card_distribution": {
+        "Drake": {"prob": 0.5, "rarity": "common"},
+        "Alex": {"prob": 0.3, "rarity": "rare"}
+    },
+    "total_cards": 10
+}

@@ -1,7 +1,7 @@
 import requests
 from utils.pretty_display import print_info, print_border, print_startup_message
 
-class Client:
+class SignInClient:
     def __init__(self, base_url: str):
         self.base_url = base_url
 
@@ -15,11 +15,20 @@ class Client:
         response = requests.post(url, json=payload)
         return response.json()
 
+    def login_user(self, email: str, password: str):
+        url = f"{self.base_url}/login"
+        payload = {
+            "email": email,
+            "password": password
+        }
+        response = requests.post(url, json=payload)
+        return response.json()
+
 
 
 
 def main():
-    client = Client(base_url="http://localhost:8000")
+    client = SignInClient(base_url="http://localhost:8000")
     # get user input for new user;
     # ask users to create a new account or sign in
     print_border()
@@ -52,7 +61,20 @@ def main():
             exit(1)
         if "message" in response:
             print(f"Success: {response['message']}")
-            # continue onwards to main app functionality
+            print("Please restart and log-in with your credentials.")
+            exit(0)
+
+    elif choice_int == 2:
+        email = input("Enter email: ")
+        password = input("Enter password: ")
+        response = client.login_user(email, password)
+        if "error" in response:
+            print(f"Error logging in: {response['error']}")
+            exit(1)
+        if "message" in response:
+            print(f"Success: {response['message']}")
+            print("You are now logged in.")
+
 
 
     # loop on true as a kind of like

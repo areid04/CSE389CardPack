@@ -1,0 +1,83 @@
+---THIS IS A FILE TO HELP WITH DATABASE STRUCTURE--
+
+for our project we have multiple options for what database structure
+could be as simple as a text file but realistically from the list of the most common db types
+(especially those that we are familiar with) this is my opinion for what we should use
+
+Oracle
+MySql
+sqlite -------->>> this is the one i think we should use
+txt file
+mongodb/non sql databases
+
+even though there would be some benefits to use a nosql database for a theoretically
+infinite list of cards, there are a couple reasons why i like sqlite
+
+    1. its preinstalled/able to be viewed and accessed from both microsoft, linux and mac
+        shells with no additional hassle (hopefully)
+    2. in our project, we are going to be working with realistically a relatively small list
+    3. sqlite is on a single server and is based on files with no multi server clustering
+    4. most if sqlite is basic CRUD operations which is prbobly all we are going to need for this
+    5. there's already alot of documentation abt sqlite
+    6. lots of additional extensions
+
+    we can discuss more about the feasability of a nosql database, but for now im going to plan
+    with sqlite
+
+
+---------LOOK AT THIS LINK---------
+
+https://sqlitebrowser.org
+https://sqlitebrowser.org/dl/
+
+this is the visualizer/ db schema i have used to visualizing and working with databases
+yeahs its free and all that good stuff but the reason i think its helpful for everyone is
+you can query the database and view the model and tables weithout having to know pretty much
+any code.
+
+this really helps me get a better idea of the stucture, and for whatever we use i think we should
+all use this framework
+
+    https://www.youtube.com/watch?v=o8d38cGb7vY
+
+    https://www.youtube.com/watch?v=xwDaMFPCZrA
+
+    https://www.youtube.com/watch?v=uRybPy3c2To
+    (dont even bother with this one lol) ---> relational database info
+
+    https://www.youtube.com/watch?v=wvOgQUKb3Ag
+
+
+--------------------------------------------------------------------------------------------------
+
+the last thing i think is worth mentioning is how we are going to use this database to interact
+with other code.
+i have use sqlite with c# and it is pretty much supported by every language
+however, depending on what we mainly use and what server side support we use we will have to
+cater the extensions accordingly
+
+https://www.youtube.com/watch?v=byHcYRpMgI4
+
+these are the only extensions i think we might end up using
+
+value assigning
+sha/ encryption
+
+im planning to max out the cybersecurity stuff towards the end of the project after we have a basic
+draft running
+optimising safety even for a dataset below a couple thousand could be point farming for us
+
+here is a list of thinks we can impliment
+
+sql injection (solutions will vary depending on how much js we use)
+xxs (validity/user checking on post requests)
+anti-csrf tokens (not really related to this tho)
+
+
+DO NOT CONCATENATE USER INPUT TO SQL STRINGS!!!
+
+        cursor.execute("SELECT * FROM cards WHERE id = ?", (user_input,))
+
+         GOOD^^^^^^^
+
+        db.run("SELECT * FROM cards WHERE name = '" + name + "'");

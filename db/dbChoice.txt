@@ -1,0 +1,46 @@
+1.
+
+"static" ammount of cards
+
+user id is generated at random
+
+cards are stored in their own seperate table and are encoded with a value
+
+we basically hard code (or come up with a function) that assigns value to a premade list of cards
+
+we get to choose what our rarity distribution spread is
+
+card owner variable is assigned null and only assigned when cards are opened
+
+
+2.
+
+cards are items of group pack
+
+static ammount with rarity/value predetermined as above
+
+cards can only be traded between users
+
+pack is purely a get request of size(pack)
+
+
+3.
+
+dynamic / non defined card value
+
+cards that have their own value distribution
+
+packs are bouoght for higher prices if there is a better change of a higher value distribution spread
+
+opening packs is a create request that generates cards in the database and assigns their user owner
+upon generation
+card_owner is never null
+every time a user has a card added, it is also added to their ownership history
+
+4.
+cards are items of pack where pack contains a random selection of items from cards
+value is not predetermined, but determined by frequency
+card_owner is initially null
+ownership history is subtable of type card
+pack is ether predetermined if card number is static or dynamic and assigned value upon creation
+if people can buy packs of multiple sizes

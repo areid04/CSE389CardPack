@@ -72,6 +72,9 @@ async def signup_user(user: CreateUser):
             'password': user.password  # TODO: hash password before storing
         }
         success = append_to_csv(path_to_csv, fieldnames, data)
+
+        # generate a card pack for the new user. How do we store this?
+
         if success:
             return JSONResponse(status_code=201, content={"message": "User created successfully"})
         else:

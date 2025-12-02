@@ -1,8 +1,9 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, WebSocket
 from fastapi.responses import JSONResponse
 from pathlib import Path
 import uuid
 import csv
+from datetime import datetime
 
 # import dataclasses
 from server_components.server_classes import CreateUser, LoginUser
@@ -81,14 +82,40 @@ async def signup_user(user: CreateUser):
             return JSONResponse(status_code=500, content={"error": "Failed to create user"})
 
 
-# post search for auction information
-# EXAMPLE USING SQLITE, BUT THE SEARCH SHOULD BE THE SAME STILL
-@app.post("/post/marketplace")
-async def post_marketplace_search(search: MarketSearchRequest):
-    # query on a SQL db for matching items
 
+class ConnectionManager:
+    def __init__(self):
+        self.active_connections: set[WebSocket] = set()
 
+    async def connect(self, websocket: WebSocket):
+        await websocket.accept()
+        self.active_connections.add(websocket)
 
+    def disconnect(self, websocket: WebSocket):
+        self.active_connections.remove(websocket)
+
+    async def send_personal_message(self, message: str, websocket: WebSocket):
+        await websocket.send_text(message)
+
+    async def broadcast(self, message: str):
+        for connection in self.active_connections:
+            await connection.send_text(message)
+
+# joining the live trade waiting room. Will create a seperate websocket once two clients are matched.
+@app.websocket("/ws/trade_waiting_room")
+async def websocket_trade_waiting_room(websocket: WebSocket):
+    manager = ConnectionManager()
+    await manager.connect(websocket)
+    try:
+        while True:
+            data = await websocket.receive_text()
+            current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            user = "User"  # how do we get the username here?
+            print(f"{current_time} - {user}: {data}")
+            await manager.broadcast(f"You wrote: {data}")
+
+    except Exception as e:
+        print(f"WebSocket connection closed: {e}")
 
 
 

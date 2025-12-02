@@ -11,7 +11,10 @@ from utils.db_access import (
     init_db, 
     get_user_by_email, 
     get_user_by_username, 
-    create_user_entry
+    create_user_entry,
+    add_cards_to_collection,
+    get_user_cards,
+    get_user_inventory
 )
 
 app = FastAPI()
@@ -111,10 +114,48 @@ async def debug_open(email: Email):
         pack = pack_from_path(result)
         # pack object
         cards = pack.open_pack()
-        print(cards) # for our debug statement
-        return JSONResponse(status_code=201, content={"message": "Opened Pack Successfully"})
+        
+        # Save opened cards to user's collection
+        add_cards_to_collection(row['uuid'], cards)
+        
+        # Convert cards to JSON-serializable format
+        cards_data = [{"name": card.name, "rarity": card.rarity} for card in cards]
+        
+        return JSONResponse(status_code=201, content={
+            "message": "Opened Pack Successfully",
+            "cards": cards_data
+        })
     else:
-        return JSONResponse(status_code=401, content={"message": "Coukd Not Open Pack; do you really have this?"})
+        return JSONResponse(status_code=401, content={"message": "Could Not Open Pack; do you really have this?"})
+
+
+@app.post("/my_cards")
+async def get_my_cards(email: Email):
+    """Get all cards owned by a user."""
+    row = get_user_by_email(email.email)
+    if not row:
+        return JSONResponse(status_code=404, content={"error": "User not found"})
+    
+    cards = get_user_cards(row['uuid'])
+    return JSONResponse(status_code=200, content={
+        "cards": cards,
+        "total_unique": len(cards),
+        "total_cards": sum(card['qty'] for card in cards)
+    })
+
+
+@app.post("/my_packs")
+async def get_my_packs(email: Email):
+    """Get all packs owned by a user."""
+    row = get_user_by_email(email.email)
+    if not row:
+        return JSONResponse(status_code=404, content={"error": "User not found"})
+    
+    packs = get_user_inventory(row['uuid'])
+    return JSONResponse(status_code=200, content={
+        "packs": packs,
+        "total_packs": sum(pack['qty'] for pack in packs)
+    })
 
 
 

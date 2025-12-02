@@ -112,6 +112,11 @@ async def debug_open(email: Email):
         # pack object
         cards = pack.open_pack()
         print(cards) # for our debug statement
+
+        # TODO: Submit each elemnt in this card array to 
+        # the db, LOOK AT THE SCHEMA FOR REFERENCE
+
+
         return JSONResponse(status_code=201, content={"message": "Opened Pack Successfully"})
     else:
         return JSONResponse(status_code=401, content={"message": "Coukd Not Open Pack; do you really have this?"})

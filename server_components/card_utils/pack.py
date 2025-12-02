@@ -2,7 +2,7 @@
 # each pack contains a distribution of cards, as a kewargs dict.
 # create the cards
 import random
-from card import Card
+from .card import Card
 from typing import Dict, Any
 
 

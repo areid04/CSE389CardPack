@@ -81,3 +81,10 @@ DO NOT CONCATENATE USER INPUT TO SQL STRINGS!!!
          GOOD^^^^^^^
 
         db.run("SELECT * FROM cards WHERE name = '" + name + "'");
+
+
+
+user/password db
+user card inventory
+user pack inventory
+currently_sold_cards_on_marketplaces

@@ -33,12 +33,25 @@ class MainClient:
 
     # basic init like above
 
-    def __init__(self, base_url: str):
+    def __init__(self, base_url: str, logged_email:str):
         self.base_url = base_url
+        self.email = logged_email
         self.session = requests.Session()
         self.is_in_waiting_room = False
         self._ws_app = None
         self._ws_thread = None
+
+    def debug_create_pack(self):
+        url = f"{self.base_url}/gen_default_pack"
+        payload = {"email": self.email}
+        response = self.session.post(url, json=payload)
+        return response.json()
+
+    def debug_open_pack(self):
+        url = f"{self.base_url}/open_pack"
+        payload = {"email": self.email}
+        response = self.session.post(url, json=payload)
+        return response.json()
 
     def create_pack(self, card_name:str, max_cards:int):
         url = f"{self.base_url}/create_pack"
@@ -204,13 +217,13 @@ def main():
 
     # loop on for the main client
 
-    main_client = MainClient(base_url="http://localhost:8000")
+    main_client = MainClient(base_url="http://localhost:8000", logged_email=response['email'])
     while True:
         # give us selection of options
         switch_case = {
-            '1': 'Create Card Pack',
+            '1': 'Generate Card Pack (debug simple)',
             '2': 'Join Trade Waiting Room',
-            '3': 'Send Trade Message',
+            '3': 'Open Card (debug simple)',
             '4': 'Exit'
         }
         print("Options:")
@@ -220,7 +233,7 @@ def main():
 
         match choice:
             case '1':
-                pass
+                response = main_client.debug_create_pack()
             case '2':
                 join_response = main_client.join_trade_waiting_room()
                 if join_response.get("connected"):
@@ -232,7 +245,7 @@ def main():
                 else:
                     print("Failed to join trade waiting room.")
             case '3':
-                pass
+                response = main_client.debug_open_pack()
 
         #
 if __name__ == "__main__":

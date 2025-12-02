@@ -191,3 +191,92 @@ def open_default_pack(user_uuid: str):
     finally:
         conn.close()
     # TODO:  take the confirmed existing card pack, decrement it, and generate card pack, add those all to user inventroy
+
+
+def add_card_to_collection(user_uuid: str, card_name: str, rarity: str) -> bool:
+    """
+    Save a single opened card to the user's CardsOpened collection.
+    """
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute("""
+            INSERT INTO CardsOpened (uuid, card_name, rarity)
+            VALUES (?, ?, ?)
+        """, (user_uuid, card_name, rarity))
+        conn.commit()
+        return True
+    except Exception as e:
+        print(f"Error adding card to collection: {e}")
+        return False
+    finally:
+        conn.close()
+
+
+def add_cards_to_collection(user_uuid: str, cards: list) -> bool:
+    """
+    Save multiple opened cards to the user's CardsOpened collection.
+    cards: list of Card objects with .name and .rarity attributes
+    """
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        for card in cards:
+            cursor.execute("""
+                INSERT INTO CardsOpened (uuid, card_name, rarity)
+                VALUES (?, ?, ?)
+            """, (user_uuid, card.name, card.rarity))
+        conn.commit()
+        return True
+    except Exception as e:
+        print(f"Error adding cards to collection: {e}")
+        return False
+    finally:
+        conn.close()
+
+
+def get_user_cards(user_uuid: str) -> list:
+    """
+    Retrieve all cards owned by a user, grouped by card name and rarity.
+    Returns list of dicts with card_name, rarity, qty, and latest acquired_at.
+    """
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute("""
+            SELECT card_name, rarity, COUNT(*) as qty, MAX(acquired_at) as acquired_at
+            FROM CardsOpened
+            WHERE uuid = ?
+            GROUP BY card_name, rarity
+            ORDER BY acquired_at DESC
+        """, (user_uuid,))
+        rows = cursor.fetchall()
+        return [dict(row) for row in rows]
+    except Exception as e:
+        print(f"Error getting user cards: {e}")
+        return []
+    finally:
+        conn.close()
+
+
+def get_user_inventory(user_uuid: str) -> list:
+    """
+    Retrieve all packs owned by a user.
+    Returns list of dicts with pack_name, qty, pack_path, and created_at.
+    """
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute("""
+            SELECT pack_name, qty, pack_path, created_at
+            FROM Inventory
+            WHERE uuid = ? AND qty > 0
+            ORDER BY created_at DESC
+        """, (user_uuid,))
+        rows = cursor.fetchall()
+        return [dict(row) for row in rows]
+    except Exception as e:
+        print(f"Error getting user inventory: {e}")
+        return []
+    finally:
+        conn.close()

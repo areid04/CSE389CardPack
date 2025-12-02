@@ -53,6 +53,20 @@ class MainClient:
         response = self.session.post(url, json=payload)
         return response.json()
 
+    def get_my_cards(self):
+        """Get all cards owned by the user."""
+        url = f"{self.base_url}/my_cards"
+        payload = {"email": self.email}
+        response = self.session.post(url, json=payload)
+        return response.json()
+
+    def get_my_packs(self):
+        """Get all packs owned by the user."""
+        url = f"{self.base_url}/my_packs"
+        payload = {"email": self.email}
+        response = self.session.post(url, json=payload)
+        return response.json()
+
     def create_pack(self, card_name:str, max_cards:int):
         url = f"{self.base_url}/create_pack"
         response = self.session.post(url)
@@ -223,30 +237,81 @@ def main():
         switch_case = {
             '1': 'Generate Card Pack (debug simple)',
             '2': 'Join Trade Waiting Room',
-            '3': 'Open Card (debug simple)',
-            '4': 'Exit'
+            '3': 'Open Card Pack',
+            '4': 'View My Cards',
+            '5': 'View My Packs',
+            '6': 'Exit'
         }
-        print("Options:")
+        print("\nOptions:")
         for key, value in switch_case.items():
             print(f"{key}. {value}")
-        choice = input("Enter choice (1-4): ")
+        choice = input("Enter choice (1-6): ")
 
         match choice:
             case '1':
                 response = main_client.debug_create_pack()
+                if "message" in response:
+                    print(f"Success: {response['message']}")
             case '2':
                 join_response = main_client.join_trade_waiting_room()
                 if join_response.get("connected"):
                     print("Joined trade waiting room successfully.")
                     # goto trade wait main
                     trade_wait_main(main_client)
-
-
                 else:
                     print("Failed to join trade waiting room.")
             case '3':
                 response = main_client.debug_open_pack()
-
-        #
+                if "error" in response:
+                    print(f"Error: {response.get('message', response.get('error'))}")
+                elif "cards" in response:
+                    print_border()
+                    print("You opened the following cards:")
+                    print_border()
+                    for card in response['cards']:
+                        rarity_tag = f"[{card['rarity'].upper()}]"
+                        print(f"  {rarity_tag} {card['name']}")
+                    print_border()
+                else:
+                    print(f"Response: {response}")
+            case '4':
+                response = main_client.get_my_cards()
+                if "error" in response:
+                    print(f"Error: {response['error']}")
+                elif "cards" in response:
+                    total_cards = response.get('total_cards', 0)
+                    total_unique = response.get('total_unique', 0)
+                    print_border()
+                    print(f"Your Card Collection ({total_cards} total, {total_unique} unique)")
+                    print_border()
+                    if response['cards']:
+                        for card in response['cards']:
+                            rarity_tag = f"[{card['rarity'].upper()}]"
+                            print(f"  {rarity_tag} {card['card_name']} x{card['qty']}")
+                    else:
+                        print("  You don't have any cards yet. Open some packs!")
+                    print_border()
+                else:
+                    print(f"Unexpected response: {response}")
+            case '5':
+                response = main_client.get_my_packs()
+                if "error" in response:
+                    print(f"Error: {response['error']}")
+                elif "packs" in response:
+                    total_packs = response.get('total_packs', 0)
+                    print_border()
+                    print(f"Your Pack Inventory ({total_packs} total)")
+                    print_border()
+                    if response['packs']:
+                        for pack in response['packs']:
+                            print(f"  [PACK] {pack['pack_name']} x{pack['qty']}")
+                    else:
+                        print("  You don't have any packs. Buy some!")
+                    print_border()
+                else:
+                    print(f"Unexpected response: {response}")
+            case '6':
+                print("Goodbye!")
+                exit(0)
 if __name__ == "__main__":
     main()

@@ -357,3 +357,37 @@ def change_card_ownership(seller_uuid:str, buyer_uuid:str, card:Card):
         return False
     finally:
         conn.close()
+
+
+# @EmiF1
+
+def change_money(ammount: int, account_uuid:str):
+    # update Bank table based on this function call
+    pass
+
+def exchange_money(giver_uuid: str, taker_uuid: str):
+    # update bank table from one end to the other
+    pass
+
+def non_negative_check(ammount: int, account_uuid: str):
+    # check this does not lead to a negative balance
+    pass
+
+# another nice thing to have would be a daily-login cash bonus!
+
+# one way that you can achieve this is with:
+
+# 1. create a set() called "uuids_logged_in_today"
+
+# 2. on the login endpoint in server.py, check if "logging_in_user" in uuids_logged...
+
+# 3. if this is a daily login, send a cash bonus (100 coins / monies whatever)
+
+# Update the endpoint (minimally) to make this possible
+
+# it's okay if the data does not exist after a shutdown; small project example
+
+# 4. make a background process that 1. checks time until midnight on start
+#   2. sleep until midnight (that found time)
+#   3. at midnight, uuids_logged... = set()
+#   4. wait until next midnight, repeat.

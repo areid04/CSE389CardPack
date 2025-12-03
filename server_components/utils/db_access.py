@@ -280,3 +280,80 @@ def get_user_inventory(user_uuid: str) -> list:
         return []
     finally:
         conn.close()
+
+def select_card_by_name(user_uuid: str, card_name:str):
+    conn = get_db_connection()  
+    cursor = conn.cursor()
+    try:
+        cursor.execute("""
+            SELECT card_name, rarity, acquired_at
+            FROM CardsOpened
+            WHERE uuid = ?
+            ORDER BY card_name
+        """, (user_uuid,))
+
+        all_cards = cursor.fetchall()
+
+        cursor.execute("""
+            SELECT card_name, rarity, acquired_at
+            FROM CardsOpened
+            WHERE uuid = ? AND card_name = ?
+        """, (user_uuid, card_name))
+        
+        row = cursor.fetchone()
+        print(row)
+
+        if row:
+            # Convert row to dictionary for easier access
+            return {
+                "card_name": row[0],
+                "rarity": row[1],
+                "uuid": user_uuid
+            }
+        return None  # Return None if no card found
+    except Exception as e:
+        print(f"Error getting card{e}")
+        return []
+    finally:
+        conn.close()
+
+from ..card_utils.card import Card
+
+
+# swap hands basically
+# swap hands basically
+def change_card_ownership(seller_uuid:str, buyer_uuid:str, card:Card):
+    card_name = card.card_name
+    card_rarity = card.rarity
+
+    conn = get_db_connection()  
+    cursor = conn.cursor()
+    try:
+        # check that seller owns this card
+        cursor.execute("""
+            SELECT id FROM CardsOpened
+            WHERE uuid = ? AND card_name = ? AND rarity = ?
+        """, (seller_uuid, card_name, card_rarity))
+        
+        row = cursor.fetchone()
+
+        if row:
+            card_id = row['id']
+            # Update the uuid to transfer ownership to buyer
+            cursor.execute("""
+                UPDATE CardsOpened
+                SET uuid = ?
+                WHERE id = ?
+            """, (buyer_uuid, card_id))
+            
+            conn.commit()
+            return True
+        else:
+            print(f"Card {card_name} ({card_rarity}) not found in {seller_uuid}'s collection")
+            return False
+            
+    except Exception as e:
+        print(f"Error changing card ownership: {e}")
+        return False
+    finally:
+        conn.close()

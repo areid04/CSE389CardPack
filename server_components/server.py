@@ -2,6 +2,15 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.responses import JSONResponse
 import uuid
 from datetime import datetime
+from card_utils.card import Card
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException
+from dataclasses import dataclass, field
+from collections import deque
+from typing import Dict, Optional, Set
+import asyncio
+import json
+import uuid
+from datetime import datetime
 
 # import dataclasses
 from server_classes import CreateUser, LoginUser, Email
@@ -156,6 +165,391 @@ async def get_my_packs(email: Email):
         "packs": packs,
         "total_packs": sum(pack['qty'] for pack in packs)
     })
+
+@dataclass
+class AuctionItem:
+    card: Card
+    seller_uuid: str
+    ttl: int  # seconds
+    buyout: int
+    starting: int
+
+@dataclass
+class BidMessage:
+    bidder_uuid: str
+    amount: int
+    timestamp: datetime
+
+class AuctionRoom:
+    def __init__(self, assigned_id: int):
+        self.auc_list = deque([])
+        self.id = assigned_id
+        
+        self.current_item: Optional[AuctionItem] = None
+        self.time_remaining: int = 0
+        self.timer_task: Optional[asyncio.Task] = None
+        
+        self.current_bid = 0
+        self.current_winning_bidder: Optional[str] = None
+        self.bid_history: list[BidMessage] = []
+        
+        # WebSocket connections mapped by user_uuid
+        self.active_connections: Dict[str, WebSocket] = {}
+        
+        self.room_active = False
+        self.listing_name = self._update_listing_name()
+    
+    def _update_listing_name(self) -> str:
+        if self.current_item:
+            return f"Auction Room {self.id} | Selling {self.current_item.card.name}"
+        return f"Auction Room {self.id} | Open"
+    
+    async def connect(self, websocket: WebSocket, user_uuid: str):
+        """Add a new WebSocket connection to the room"""
+        await websocket.accept()
+        self.active_connections[user_uuid] = websocket
+        
+        # Send current auction state to new connection
+        await self.send_current_state(user_uuid)
+        
+        # Notify others of new participant
+        await self.broadcast({
+            "type": "user_joined",
+            "user_uuid": user_uuid,
+            "total_participants": len(self.active_connections)
+        }, exclude=user_uuid)
+    
+    async def disconnect(self, user_uuid: str):
+        """Remove a WebSocket connection"""
+        if user_uuid in self.active_connections:
+            del self.active_connections[user_uuid]
+            
+        await self.broadcast({
+            "type": "user_left",
+            "user_uuid": user_uuid,
+            "total_participants": len(self.active_connections)
+        })
+    
+    async def send_current_state(self, user_uuid: str):
+        """Send current auction state to a specific user"""
+        if user_uuid not in self.active_connections:
+            return
+            
+        state = {
+            "type": "auction_state",
+            "room_id": self.id,
+            "current_item": {
+                "card_name": self.current_item.card.name if self.current_item else None,
+                #"card_id": self.current_item.card.id if self.current_item else None,
+                "seller_uuid": self.current_item.seller_uuid if self.current_item else None,
+                "buyout": self.current_item.buyout if self.current_item else None,
+                "starting": self.current_item.starting if self.current_item else None,
+            } if self.current_item else None,
+            "current_bid": self.current_bid,
+            "current_winner": self.current_winning_bidder,
+            "time_remaining": self.time_remaining,
+            "room_active": self.room_active,
+            "queue_length": len(self.auc_list)
+        }
+        
+        await self.active_connections[user_uuid].send_json(state)
+    
+    async def broadcast(self, message: dict, exclude: Optional[str] = None):
+        """Broadcast message to all connected clients"""
+        disconnected = []
+        for user_uuid, websocket in self.active_connections.items():
+            if exclude and user_uuid == exclude:
+                continue
+            try:
+                await websocket.send_json(message)
+            except:
+                disconnected.append(user_uuid)
+        
+        # Clean up disconnected clients
+        for user_uuid in disconnected:
+            await self.disconnect(user_uuid)
+    
+    async def countdown_timer(self):
+        """Background task to handle auction timer"""
+        while self.time_remaining > 0:
+            await asyncio.sleep(1)
+            self.time_remaining -= 1
+            
+            # Broadcast timer update every 5 seconds or when under 10 seconds
+            if self.time_remaining % 5 == 0 or self.time_remaining <= 10:
+                await self.broadcast({
+                    "type": "timer_update",
+                    "time_remaining": self.time_remaining
+                })
+        
+        # Auction ended
+        await self.end_current_auction()
+    
+    async def start_next_auction(self):
+        """Start the next auction from the queue"""
+        if not self.auc_list:
+            self.room_active = False
+            self.current_item = None
+            await self.broadcast({
+                "type": "room_idle",
+                "message": "No items in queue"
+            })
+            return
+        
+        auction_item = self.auc_list.popleft()
+        await self.setup(auction_item)
+    
+    async def setup(self, auction_item: AuctionItem):
+        """Setup a new auction"""
+        self.current_item = auction_item
+        self.time_remaining = auction_item.ttl
+        self.current_bid = auction_item.starting
+        self.current_winning_bidder = None
+        self.bid_history = []
+        self.room_active = True
+        self.listing_name = self._update_listing_name()
+        
+        # Cancel previous timer if exists
+        if self.timer_task and not self.timer_task.done():
+            self.timer_task.cancel()
+        
+        # Start countdown timer
+        self.timer_task = asyncio.create_task(self.countdown_timer())
+        
+        # Notify all clients of new auction
+        await self.broadcast({
+            "type": "auction_started",
+            "item": {
+                "card_name": auction_item.card.name,
+                #"card_id": auction_item.card.id,
+                "seller_uuid": auction_item.seller_uuid,
+                "starting_bid": auction_item.starting,
+                "buyout_price": auction_item.buyout,
+                "time_limit": auction_item.ttl
+            }
+        })
+    
+    async def place_bid(self, user_uuid: str, amount: int) -> dict:
+        """Handle a bid from a user"""
+        if not self.room_active:
+            return {"success": False, "error": "No active auction"}
+        
+        if not self.current_item:
+            return {"success": False, "error": "No item being auctioned"}
+        
+        # Validate: seller can't bid on their own item
+        if user_uuid == self.current_item.seller_uuid:
+            return {"success": False, "error": "Cannot bid on your own item"}
+        
+        # Validate: bid must be higher than current
+        if amount <= self.current_bid:
+            return {"success": False, "error": f"Bid must be higher than current bid of {self.current_bid}"}
+        
+        # Check for buyout
+        if amount >= self.current_item.buyout:
+            self.current_bid = self.current_item.buyout
+            self.current_winning_bidder = user_uuid
+            await self.broadcast({
+                "type": "buyout",
+                "bidder": user_uuid,
+                "amount": self.current_item.buyout
+            })
+            await self.end_current_auction()
+            return {"success": True, "buyout": True}
+        
+        # Regular bid
+        self.current_bid = amount
+        self.current_winning_bidder = user_uuid
+        self.bid_history.append(BidMessage(user_uuid, amount, datetime.now()))
+        
+        # Extend timer if bid placed in last 10 seconds
+        if self.time_remaining < 10:
+            self.time_remaining = 10
+            await self.broadcast({
+                "type": "timer_extended",
+                "new_time": 10
+            })
+        
+        await self.broadcast({
+            "type": "new_bid",
+            "bidder": user_uuid,
+            "amount": amount,
+            "time_remaining": self.time_remaining
+        })
+        
+        return {"success": True, "buyout": False}
+    
+    async def end_current_auction(self):
+        """End the current auction and process the winner"""
+        if self.timer_task and not self.timer_task.done():
+            self.timer_task.cancel()
+        
+        if self.current_winning_bidder and self.current_item:
+            # Winner found - you'll implement transaction later
+            await self.broadcast({
+                "type": "auction_won",
+                "winner": self.current_winning_bidder,
+                "final_bid": self.current_bid,
+                "item": self.current_item.card.name
+            })
+            
+            # Here you would call transact() once implemented
+            
+        else:
+            # No bids
+            await self.broadcast({
+                "type": "auction_failed",
+                "reason": "No bids received"
+            })
+        
+        # Start next auction after delay
+        await asyncio.sleep(5)
+        await self.start_next_auction()
+    
+    def add_to_auc_queue(self, item: AuctionItem):
+        """Add an item to the auction queue"""
+        self.auc_list.append(item)
+        if not self.room_active and not self.current_item:
+            # Start auction if room is idle
+            asyncio.create_task(self.start_next_auction())
+
+
+class AuctionHouse:
+    def __init__(self):
+        self.rooms: Dict[int, AuctionRoom] = {}
+        # Initialize 10 rooms
+        for i in range(10):
+            self.rooms[i] = AuctionRoom(i)
+    
+    def get_room_status(self) -> list:
+        """Get status of all auction rooms"""
+        return [
+            {
+                "room_id": room.id,
+                "listing_name": room.listing_name,
+                "active": room.room_active,
+                "current_bid": room.current_bid if room.current_item else None,
+                "participants": len(room.active_connections),
+                "queue_length": len(room.auc_list),
+                "time_remaining": room.time_remaining if room.room_active else None
+            }
+            for room in self.rooms.values()
+        ]
+    
+    def get_available_room(self) -> Optional[int]:
+        """Find the best room to add a new auction item"""
+        # Prioritize rooms with shortest queues
+        sorted_rooms = sorted(
+            self.rooms.values(),
+            key=lambda r: len(r.auc_list)
+        )
+        if sorted_rooms:
+            return sorted_rooms[0].id
+        return None
+
+
+auction_house = AuctionHouse()
+
+@app.get("/auction/rooms")
+async def get_auction_rooms():
+    """REST endpoint to get all auction room statuses"""
+    return {
+        "rooms": auction_house.get_room_status()
+    }
+
+from pydantic import BaseModel
+
+class ListItemRequest(BaseModel):
+    card_name: str
+    seller_uuid: str
+    starting_bid: int
+    buyout_price: int
+    time_limit: int = 300
+
+@app.post("/auction/list-item")
+async def list_item(request: ListItemRequest):
+    """REST endpoint to list an item for auction"""
+    # Get card from database 
+    from utils.db_access import select_card_by_name
+    card = select_card_by_name(request.seller_uuid, request.card_name)
+    classed_card = Card(card["card_name"], card["rarity"])
+    
+    # Find best room for the item
+    room_id = auction_house.get_available_room()
+    if room_id is None:
+        raise HTTPException(status_code=503, detail="No available auction rooms")
+    
+    auction_item = AuctionItem(
+        card=classed_card,
+        seller_uuid=request.seller_uuid,
+        ttl=request.time_limit,
+        buyout=request.buyout_price,
+        starting=request.starting_bid
+    )
+    
+    room = auction_house.rooms[room_id]
+    room.add_to_auc_queue(auction_item)
+    
+    return {
+        "success": True,
+        "room_id": room_id,
+        "queue_position": len(room.auc_list)
+    }
+
+@app.websocket("/auction/room/{room_id}")
+async def websocket_auction_room(
+    websocket: WebSocket,
+    room_id: int,
+    user_uuid: str
+):
+    """WebSocket endpoint for auction room"""
+    if room_id not in auction_house.rooms:
+        await websocket.close(code=4004, reason="Room not found")
+        return
+    
+    room = auction_house.rooms[room_id]
+    await room.connect(websocket, user_uuid)
+    
+    try:
+        while True:
+            # Receive messages from client
+            data = await websocket.receive_json()
+            
+            if data["type"] == "bid":
+                result = await room.place_bid(
+                    user_uuid=user_uuid,
+                    amount=data["amount"]
+                )
+                
+                if not result["success"]:
+                    await websocket.send_json({
+                        "type": "bid_error",
+                        "error": result["error"]
+                    })
+            
+            elif data["type"] == "ping":
+                await websocket.send_json({"type": "pong"})
+                
+    except WebSocketDisconnect:
+        await room.disconnect(user_uuid)
+
+
+        
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 

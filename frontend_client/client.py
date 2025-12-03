@@ -30,16 +30,18 @@ class SignInClient:
         return response.json()
 
 class MainClient:
-
-    # basic init like above
-
-    def __init__(self, base_url: str, logged_email:str):
+    def __init__(self, base_url: str, logged_email: str):
         self.base_url = base_url
         self.email = logged_email
         self.session = requests.Session()
         self.is_in_waiting_room = False
+        self.is_in_auction_room = False  
         self._ws_app = None
         self._ws_thread = None
+        self._auction_ws_app = None
+        self._auction_ws_thread = None
+        self.current_auction_room_id = None
+        self.user_uuid = None  # You'll need to get this from login response
 
     def debug_create_pack(self):
         url = f"{self.base_url}/gen_default_pack"
@@ -149,6 +151,163 @@ class MainClient:
             print_info(f'Error sending websocket message: {e}')
             return {'error': str(e)}
 
+    def get_auction_rooms(self):
+        """Get status of all auction rooms."""
+        url = f"{self.base_url}/auction/rooms"
+        response = self.session.get(url)
+        return response.json()
+
+    def list_item_for_auction(self, card_name: str, starting_bid: int, buyout_price: int, time_limit: int = 300):
+        """List an item in the auction house."""
+        url = f"{self.base_url}/auction/list-item"
+        payload = {
+            "card_name": card_name,
+            "seller_uuid": self.user_uuid,  
+            "buyout_price": buyout_price,
+            "time_limit": time_limit
+        }
+        response = self.session.post(url, json=payload)
+        return response.json()
+
+    def join_auction_room(self, room_id: int, on_message=None, timeout: float = 5.0):
+        """Connect to an auction room websocket."""
+        ws_path = f"{self.base_url}/auction/room/{room_id}?user_uuid={self.user_uuid}"
+        ws_url = self._to_ws_url(ws_path)
+        
+        self.current_auction_room_id = room_id
+
+        def _on_open(ws):
+            self.is_in_auction_room = True
+            print_info(f'Connected to auction room {room_id}')
+
+        def _on_message(ws, message):
+            try:
+                data = json.loads(message)
+                if on_message:
+                    on_message(data)
+                else:
+                    # Default message handling
+                    self._handle_auction_message(data)
+            except json.JSONDecodeError:
+                print_info(f'Raw WS message: {message}')
+            except Exception as e:
+                print_info(f'Error handling message: {e}')
+
+        def _on_close(ws, close_status_code, close_msg):
+            self.is_in_auction_room = False
+            self.current_auction_room_id = None
+            print_info(f'Left auction room: {close_status_code} {close_msg}')
+
+        def _on_error(ws, error):
+            print_info(f'Auction websocket error: {error}')
+
+        self._auction_ws_app = websocket.WebSocketApp(
+            ws_url,
+            on_open=_on_open,
+            on_message=_on_message,
+            on_close=_on_close,
+            on_error=_on_error,
+        )
+
+        def _run():
+            try:
+                self._auction_ws_app.run_forever()
+            except Exception as e:
+                print_info(f'Auction websocket run_forever exited: {e}')
+
+        self._auction_ws_thread = threading.Thread(target=_run, daemon=True)
+        self._auction_ws_thread.start()
+
+        # Wait for connection
+        start = time.time()
+        while not self.is_in_auction_room and (time.time() - start) < timeout:
+            time.sleep(0.05)
+
+        return {'connected': self.is_in_auction_room, 'room_id': room_id}
+
+    def _handle_auction_message(self, data):
+        """Default handler for auction messages."""
+        msg_type = data.get('type')
+        
+        if msg_type == 'auction_state':
+            print_border()
+            print("AUCTION ROOM STATUS")
+            if data.get('current_item'):
+                item = data['current_item']
+                print(f"Current Item: {item.get('card_name', 'Unknown')}")
+                print(f"Seller: {item.get('seller_uuid', 'Unknown')}")
+                print(f"Starting Bid: ${item.get('starting', 0)}")
+                print(f"Buyout Price: ${item.get('buyout', 0)}")
+            print(f"Current Bid: ${data.get('current_bid', 0)}")
+            print(f"Current Winner: {data.get('current_winner', 'None')}")
+            print(f"Time Remaining: {data.get('time_remaining', 0)}s")
+            print(f"Queue Length: {data.get('queue_length', 0)}")
+            print_border()
+            
+        elif msg_type == 'auction_started':
+            item = data.get('item', {})
+            print_border()
+            print(" NEW AUCTION STARTED!")
+            print(f"Item: {item.get('card_name', 'Unknown')}")
+            print(f"Starting Bid: ${item.get('starting_bid', 0)}")
+            print(f"Buyout: ${item.get('buyout_price', 0)}")
+            print(f"Time Limit: {item.get('time_limit', 0)}s")
+            print_border()
+            
+        elif msg_type == 'new_bid':
+            print(f" New bid: ${data.get('amount', 0)} by {data.get('bidder', 'Unknown')}")
+            
+        elif msg_type == 'timer_update':
+            remaining = data.get('time_remaining', 0)
+            if remaining <= 10:
+                print(f" WARNING: {remaining} seconds remaining!")
+            
+        elif msg_type == 'buyout':
+            print_border()
+            print(f" BUYOUT! {data.get('bidder', 'Unknown')} bought for ${data.get('amount', 0)}")
+            print_border()
+            
+        elif msg_type == 'auction_won':
+            print_border()
+            print(f" AUCTION WON by {data.get('winner', 'Unknown')} for ${data.get('final_bid', 0)}")
+            print(f"Item: {data.get('item', 'Unknown')}")
+            print_border()
+            
+        elif msg_type == 'auction_failed':
+            print(f" Auction ended with no bids: {data.get('reason', '')}")
+            
+        elif msg_type == 'bid_error':
+            print(f" Bid failed: {data.get('error', 'Unknown error')}")
+            
+        elif msg_type == 'timer_extended':
+            print(f" Timer extended to {data.get('new_time', 10)} seconds!")
+
+    def place_bid(self, amount: int):
+        """Place a bid in the current auction room."""
+        if not self.is_in_auction_room or not self._auction_ws_app:
+            print_info("You are not in an auction room.")
+            return {'error': 'not_connected'}
+
+        payload = {
+            "type": "bid",
+            "amount": amount
+        }
+        try:
+            self._auction_ws_app.send(json.dumps(payload))
+            return {'sent': True}
+        except Exception as e:
+            print_info(f'Error sending bid: {e}')
+            return {'error': str(e)}
+
+    def leave_auction_room(self):
+        """Leave the current auction room."""
+        if self._auction_ws_app:
+            self._auction_ws_app.close()
+            self.is_in_auction_room = False
+            self.current_auction_room_id = None
+            return {'left': True}
+        return {'error': 'not_in_room'}
+
 def parse_twr_command(command: str):
     # parse commands
     #returns command, args
@@ -159,6 +318,174 @@ def parse_twr_command(command: str):
         return 'chat', ' '.join(command[1:])
     if command[0].lower() == 'exit':
         return 'exit', None
+
+
+def parse_auction_command(command: str):
+    """Parse auction room commands."""
+    command = command.strip().split()
+    if not command:
+        return None, None
+    
+    cmd = command[0].lower()
+    
+    if cmd == 'bid':
+        if len(command) >= 2:
+            try:
+                amount = int(command[1])
+                return 'bid', amount
+            except ValueError:
+                return 'invalid', "Bid amount must be a number"
+        return 'invalid', "Usage: bid <amount>"
+    
+    elif cmd == 'status':
+        return 'status', None
+    
+    elif cmd == 'exit':
+        return 'exit', None
+    
+    elif cmd == 'help':
+        return 'help', None
+    
+    return 'invalid', f"Unknown command: {cmd}"
+
+def auction_room_interface(main_client: MainClient):
+    """Interactive interface for auction room."""
+    print_info(f"Entered auction room {main_client.current_auction_room_id}")
+    print_info("Commands:")
+    print_info("  bid <amount> - Place a bid")
+    print_info("  status - Request current auction status")
+    print_info("  help - Show commands")
+    print_info("  exit - Leave auction room")
+    print_border()
+    
+    while main_client.is_in_auction_room:
+        try:
+            user_input = input("Auction> ")
+            command, args = parse_auction_command(user_input)
+            
+            if command == 'bid':
+                response = main_client.place_bid(args)
+                if "error" in response:
+                    print(f"Error placing bid: {response['error']}")
+                    
+            elif command == 'status':
+                # Request status update (you could send a status request message)
+                print("Requesting auction status...")
+                
+            elif command == 'help':
+                print("Commands: bid <amount>, status, help, exit")
+                
+            elif command == 'exit':
+                main_client.leave_auction_room()
+                print("Left auction room.")
+                break
+                
+            elif command == 'invalid':
+                print(f"Error: {args}")
+                
+        except KeyboardInterrupt:
+            print("\nLeaving auction room...")
+            main_client.leave_auction_room()
+            break
+        except Exception as e:
+            print(f"Error: {e}")
+
+
+def auction_house_menu(main_client: MainClient):
+    """Auction house sub-menu."""
+    while True:
+        print_border()
+        print("AUCTION HOUSE")
+        print_border()
+        print("1. View All Auction Rooms")
+        print("2. List Item for Auction")
+        print("3. Join Auction Room")
+        print("4. Back to Main Menu")
+        
+        choice = input("Enter choice (1-4): ")
+        
+        if choice == '1':
+            response = main_client.get_auction_rooms()
+            if "rooms" in response:
+                print_border()
+                print("AUCTION ROOMS STATUS")
+                print_border()
+                for room in response['rooms']:
+                    status = "🔴" if room['active'] else "🟢"
+                    print(f"{status} Room {room['room_id']}: {room['listing_name']}")
+                    print(f"   Participants: {room['participants']}")
+                    print(f"   Queue: {room['queue_length']} items")
+                    if room['active']:
+                        print(f"   Current Bid: ${room.get('current_bid', 0)}")
+                        print(f"   Time Left: {room.get('time_remaining', 0)}s")
+                    print()
+                print_border()
+            else:
+                print(f"Error: {response}")
+                
+        elif choice == '2':
+            # First show user's cards
+            cards_response = main_client.get_my_cards()
+            if "cards" not in cards_response or not cards_response['cards']:
+                print("You don't have any cards to auction!")
+                continue
+                
+            print("\nYour Cards:")
+            for i, card in enumerate(cards_response['cards']):
+                print(f"{i+1}. [{card['rarity'].upper()}] {card['card_name']} x{card['qty']}")
+            
+            try:
+                card_idx = int(input("Select card number to auction: ")) - 1
+                if card_idx < 0 or card_idx >= len(cards_response['cards']):
+                    print("Invalid selection")
+                    continue
+                    
+                selected_card = cards_response['cards'][card_idx]
+                card_name = selected_card.get('card_name')  
+                print(card_name)
+                
+                starting_bid = int(input("Starting bid: $"))
+                buyout_price = int(input("Buyout price: $"))
+                time_limit = int(input("Time limit (seconds, default 300): ") or 300)
+                
+                response = main_client.list_item_for_auction(
+                    card_name=card_name,
+                    starting_bid=starting_bid,
+                    buyout_price=buyout_price,
+                    time_limit=time_limit
+                )
+                
+                if response.get('success'):
+                    print(f"Item listed in Room {response['room_id']}")
+                    print(f"Queue position: {response['queue_position']}")
+                else:
+                    print(f"Error: {response}")
+                    
+            except ValueError:
+                print("Invalid input")
+                
+        elif choice == '3':
+            try:
+                room_id = int(input("Enter room ID (0-9): "))
+                if room_id < 0 or room_id > 9:
+                    print("Invalid room ID")
+                    continue
+                    
+                print(f"Connecting to auction room {room_id}...")
+                response = main_client.join_auction_room(room_id)
+                
+                if response.get('connected'):
+                    auction_room_interface(main_client)
+                else:
+                    print("Failed to connect to auction room")
+                    
+            except ValueError:
+                print("Invalid room ID")
+                
+        elif choice == '4':
+            break
+        else:
+            print("Invalid choice")
 
 def trade_wait_main(main_client_instance: MainClient):
     print_info("Entered trade waiting room. You can send your commands now!")
@@ -231,7 +558,12 @@ def main():
 
     # loop on for the main client
 
-    main_client = MainClient(base_url="http://localhost:8000", logged_email=response['email'])
+    main_client = MainClient(
+        base_url="http://localhost:8000", 
+        logged_email=response['email']
+    )
+    # Set the UUID from the login response
+    main_client.user_uuid = response['uuid']
     while True:
         # give us selection of options
         switch_case = {
@@ -240,7 +572,8 @@ def main():
             '3': 'Open Card Pack',
             '4': 'View My Cards',
             '5': 'View My Packs',
-            '6': 'Exit'
+            '6': 'Exit',
+            '7': 'Auction House'
         }
         print("\nOptions:")
         for key, value in switch_case.items():
@@ -313,5 +646,7 @@ def main():
             case '6':
                 print("Goodbye!")
                 exit(0)
+            case '7':
+                auction_house_menu(main_client)
 if __name__ == "__main__":
     main()

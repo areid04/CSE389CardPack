@@ -49,10 +49,26 @@ class MainClient:
         response = self.session.post(url, json=payload)
         return response.json()
 
-    def debug_open_pack(self):
+    def open_pack(self, pack_name: str = None):
+        """Open a pack. If pack_name is None, opens most recent pack."""
         url = f"{self.base_url}/open_pack"
         payload = {"email": self.email}
+        if pack_name:
+            payload["pack_name"] = pack_name
         response = self.session.post(url, json=payload)
+        return response.json()
+
+    def add_pack(self, pack_name: str):
+        """Add a specific pack type to inventory."""
+        url = f"{self.base_url}/add_pack"
+        payload = {"email": self.email, "pack_name": pack_name}
+        response = self.session.post(url, json=payload)
+        return response.json()
+
+    def get_available_packs(self):
+        """Get list of all pack types available for purchase."""
+        url = f"{self.base_url}/available_packs"
+        response = self.session.get(url)
         return response.json()
 
     def get_my_cards(self):
@@ -572,41 +588,135 @@ def main():
             '3': 'Open Card Pack',
             '4': 'View My Cards',
             '5': 'View My Packs',
-            '6': 'Exit',
-            '7': 'Auction House'
+            '6': 'Auction House',
+            '7': 'Exit'
         }
         print("\nOptions:")
         for key, value in switch_case.items():
             print(f"{key}. {value}")
-        choice = input("Enter choice (1-6): ")
+        choice = input(f"Enter choice (1-{len(switch_case)}): ")
 
         match choice:
             case '1':
-                response = main_client.debug_create_pack()
-                if "message" in response:
-                    print(f"Success: {response['message']}")
+                # Debug: let user select a pack to add to inventory
+                available_response = main_client.get_available_packs()
+                if "error" in available_response:
+                    print(f"Error: {available_response['error']}")
+                    continue
+                
+                packs = available_response.get('packs', [])
+                if not packs:
+                    print("No packs available in the system.")
+                    continue
+                
+                print_border()
+                print("Available Packs - Choose one to add:")
+                print_border()
+                for i, pack in enumerate(packs, start=1):
+                    print(f"  {i}. {pack}")
+                print_border()
+                
+                if len(packs) == 1:
+                    prompt = "Enter 1 to select, or 0 to cancel: "
+                else:
+                    prompt = f"Enter 1-{len(packs)} to select, or 0 to cancel: "
+                
+                pack_choice = input(prompt)
+                try:
+                    pack_idx = int(pack_choice)
+                    if pack_idx == 0:
+                        continue
+                    if 1 <= pack_idx <= len(packs):
+                        selected_pack = packs[pack_idx - 1]
+                        response = main_client.add_pack(selected_pack)
+                        if "message" in response:
+                            print(f"Success: {response['message']}")
+                        else:
+                            print(f"Error: {response.get('error', 'Unknown error')}")
+                    else:
+                        print("Invalid selection.")
+                except ValueError:
+                    print("Invalid input.")
             case '2':
                 join_response = main_client.join_trade_waiting_room()
                 if join_response.get("connected"):
                     print("Joined trade waiting room successfully.")
-                    # goto trade wait main
                     trade_wait_main(main_client)
                 else:
                     print("Failed to join trade waiting room.")
             case '3':
-                response = main_client.debug_open_pack()
-                if "error" in response:
-                    print(f"Error: {response.get('message', response.get('error'))}")
-                elif "cards" in response:
+                # Show user's pack inventory and let them choose which to open
+                packs_response = main_client.get_my_packs()
+                if "error" in packs_response:
+                    print(f"Error: {packs_response['error']}")
+                    continue
+                
+                packs = packs_response.get('packs', [])
+                if not packs:
+                    print("You don't have any packs to open. Get some first!")
+                    continue
+                
+                # Pagination variables
+                page = 0
+                per_page = 9
+                total_pages = (len(packs) + per_page - 1) // per_page
+                
+                while True:
+                    start_idx = page * per_page
+                    end_idx = min(start_idx + per_page, len(packs))
+                    page_packs = packs[start_idx:end_idx]
+                    
                     print_border()
-                    print("You opened the following cards:")
+                    print(f"Your Packs - Choose one to open (Page {page + 1}/{total_pages}):")
                     print_border()
-                    for card in response['cards']:
-                        rarity_tag = f"[{card['rarity'].upper()}]"
-                        print(f"  {rarity_tag} {card['name']}")
+                    for i, pack in enumerate(page_packs, start=1):
+                        print(f"  {i}. {pack['pack_name']} x{pack['qty']}")
                     print_border()
-                else:
-                    print(f"Response: {response}")
+                    
+                    # Build prompt
+                    if len(page_packs) == 1:
+                        prompt = "Enter 1 to select"
+                    else:
+                        prompt = f"Enter 1-{len(page_packs)} to select"
+                    
+                    if total_pages > 1:
+                        prompt += ", 'n' for next page, 'p' for previous"
+                    prompt += ", or 0 to cancel: "
+                    
+                    pack_choice = input(prompt)
+                    
+                    if pack_choice.lower() == 'n' and page < total_pages - 1:
+                        page += 1
+                        continue
+                    elif pack_choice.lower() == 'p' and page > 0:
+                        page -= 1
+                        continue
+                    
+                    try:
+                        pack_idx = int(pack_choice)
+                        if pack_idx == 0:
+                            break
+                        if 1 <= pack_idx <= len(page_packs):
+                            selected_pack = page_packs[pack_idx - 1]['pack_name']
+                            response = main_client.open_pack(selected_pack)
+                            
+                            if "error" in response:
+                                print(f"Error: {response['error']}")
+                            elif "cards" in response:
+                                print_border()
+                                print(f"Opened {response.get('pack_name', 'Pack')}! You got:")
+                                print_border()
+                                for card in response['cards']:
+                                    rarity_tag = f"[{card['rarity'].upper()}]"
+                                    print(f"  {rarity_tag} {card['name']}")
+                                print_border()
+                            else:
+                                print(f"Response: {response}")
+                            break
+                        else:
+                            print("Invalid selection.")
+                    except ValueError:
+                        print("Invalid input.")
             case '4':
                 response = main_client.get_my_cards()
                 if "error" in response:
@@ -644,9 +754,9 @@ def main():
                 else:
                     print(f"Unexpected response: {response}")
             case '6':
+                auction_house_menu(main_client)
+            case '7':
                 print("Goodbye!")
                 exit(0)
-            case '7':
-                auction_house_menu(main_client)
 if __name__ == "__main__":
     main()

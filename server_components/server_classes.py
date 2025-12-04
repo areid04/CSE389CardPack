@@ -13,6 +13,14 @@ class LoginUser(BaseModel):
 class Email(BaseModel):
     email: str
 
+class OpenPackRequest(BaseModel):
+    email: str
+    pack_name: Optional[str] = None  # If None, opens most recent pack
+
+class AddPackRequest(BaseModel):
+    email: str
+    pack_name: str
+
 class MarketSearchRequest(BaseModel):
     num_items: int
     min_price: float

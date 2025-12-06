@@ -68,10 +68,8 @@ def init_db():
     """)
 
     # Packs Table - Available pack types for purchase
-    # Drop and recreate to ensure correct schema
-    cursor.execute("DROP TABLE IF EXISTS Packs")
     cursor.execute("""
-    CREATE TABLE Packs (
+    CREATE TABLE IF NOT EXISTS Packs (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         pack_name TEXT NOT NULL UNIQUE,
         pack_path TEXT NOT NULL,
@@ -79,13 +77,15 @@ def init_db():
     );
     """)
 
-    # Seed default packs
-    cursor.executemany("""
-        INSERT INTO Packs (pack_name, pack_path) VALUES (?, ?)
-    """, [
-        ("Music Pack Vol 1", "/music/music_pack_vol_1.json"),
-        ("Food Pack Vol 1", "/food/food_pack_vol_1.json")
-    ])
+    # Seed default packs if table is empty
+    cursor.execute("SELECT COUNT(*) as count FROM Packs")
+    if cursor.fetchone()['count'] == 0:
+        cursor.executemany("""
+            INSERT INTO Packs (pack_name, pack_path) VALUES (?, ?)
+        """, [
+            ("Music Pack Vol 1", "/music/music_pack_vol_1.json"),
+            ("Food Pack Vol 1", "/food/food_pack_vol_1.json")
+        ])
 
     conn.commit()
     conn.close()
@@ -239,7 +239,7 @@ def add_card_to_collection(user_uuid: str, card_name: str, rarity: str) -> bool:
 def add_cards_to_collection(user_uuid: str, cards: list) -> bool:
     """
     Save multiple opened cards to the user's CardsOpened collection.
-    cards: list of Card objects with .name and .rarity attributes
+    cards: list of Card objects with .card_name and .rarity attributes
     """
     conn = get_db_connection()
     cursor = conn.cursor()
@@ -248,7 +248,7 @@ def add_cards_to_collection(user_uuid: str, cards: list) -> bool:
             cursor.execute("""
                 INSERT INTO CardsOpened (uuid, card_name, rarity)
                 VALUES (?, ?, ?)
-            """, (user_uuid, card.name, card.rarity))
+            """, (user_uuid, card.card_name, card.rarity))
         conn.commit()
         return True
     except Exception as e:
@@ -343,7 +343,7 @@ def select_card_by_name(user_uuid: str, card_name:str):
 
 
 # swap hands basically
-def change_card_ownership(seller_uuid: str, buyer_uuid: str, card: Card):
+def change_card_ownership(seller_uuid: str, buyer_uuid: str, card: "Card"):
     """
     Transfer card ownership from seller to buyer.
     card: Card object with card_name and rarity attributes
@@ -414,6 +414,13 @@ def open_pack_for_user(user_uuid: str, pack_name: Optional[str] = None) -> Optio
         row = cursor.fetchone()
         
         if not row or row['qty'] <= 0:
+            # Debug: Check what's in the inventory
+            cursor.execute("""
+                SELECT pack_name, qty FROM Inventory WHERE uuid = ?
+            """, (user_uuid,))
+            all_packs = cursor.fetchall()
+            print(f"DEBUG: User inventory: {[dict(p) for p in all_packs]}")
+            print(f"DEBUG: Looking for pack_name: '{pack_name}'")
             return None
         
         # Decrement quantity
@@ -505,6 +512,73 @@ def add_pack_type(pack_name: str, pack_path: str) -> bool:
         return False
     finally:
         conn.close()
+
+
+def scan_and_register_packs(pack_json_dir: Path) -> Dict[str, Any]:
+    """
+    Scan pack_json directory and register any new packs not in the Packs table.
+    Returns dict with stats about packs added, skipped, and errors.
+    """
+    import json
+    
+    results = {
+        "added": [],
+        "skipped": [],
+        "errors": []
+    }
+    
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    
+    try:
+        # Get existing packs from database
+        cursor.execute("SELECT pack_name FROM Packs")
+        existing_packs = {row['pack_name'] for row in cursor.fetchall()}
+        
+        # Scan all subdirectories in pack_json
+        for category_dir in pack_json_dir.iterdir():
+            if not category_dir.is_dir():
+                continue
+                
+            category = category_dir.name
+            
+            # Check each JSON file in the category
+            for json_file in category_dir.glob("*.json"):
+                try:
+                    # Read pack metadata from JSON
+                    with open(json_file, 'r') as f:
+                        pack_data = json.load(f)
+                    
+                    pack_name = pack_data.get('pack_name')
+                    if not pack_name:
+                        results["errors"].append(f"{json_file.name}: No pack_name in JSON")
+                        continue
+                    
+                    # Check if already registered
+                    if pack_name in existing_packs:
+                        results["skipped"].append(pack_name)
+                        continue
+                    
+                    # Register new pack
+                    pack_path = f"/{category}/{json_file.name}"
+                    cursor.execute("""
+                        INSERT INTO Packs (pack_name, pack_path) VALUES (?, ?)
+                    """, (pack_name, pack_path))
+                    results["added"].append(pack_name)
+                    
+                except json.JSONDecodeError:
+                    results["errors"].append(f"{json_file.name}: Invalid JSON")
+                except Exception as e:
+                    results["errors"].append(f"{json_file.name}: {str(e)}")
+        
+        conn.commit()
+        
+    except Exception as e:
+        results["errors"].append(f"Database error: {str(e)}")
+    finally:
+        conn.close()
+    
+    return results
 
 
 # @EmiF1

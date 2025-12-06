@@ -26,7 +26,8 @@ from utils.db_access import (
     get_user_inventory,
     open_pack_for_user,
     add_pack_to_inventory,
-    get_available_packs
+    get_available_packs,
+    scan_and_register_packs
 )
 
 app = FastAPI()
@@ -36,6 +37,16 @@ app = FastAPI()
 async def startup_event():
     # Initialize the SQLite DB defined in the schema
     init_db()
+    
+    # Auto-register any new packs from pack_json directory
+    from pathlib import Path
+    pack_json_dir = Path(__file__).parent / "pack_json"
+    if pack_json_dir.exists():
+        results = scan_and_register_packs(pack_json_dir)
+        if results["added"]:
+            print(f"Auto-registered {len(results['added'])} new pack(s): {', '.join(results['added'])}")
+        elif results["errors"]:
+            print(f"Pack registration errors: {results['errors']}")
 
 @app.get("/")
 async def read_root():
@@ -161,6 +172,37 @@ async def list_available_packs():
     })
 
 
+@app.post("/admin/register_packs")
+async def register_packs_from_directory():
+    """
+    Admin endpoint: Scan pack_json directory and register any new packs.
+    Returns stats about packs added, skipped, and errors.
+    """
+    from pathlib import Path
+    
+    # Get the pack_json directory path
+    pack_json_dir = Path(__file__).parent / "pack_json"
+    
+    if not pack_json_dir.exists():
+        return JSONResponse(status_code=500, content={
+            "error": "pack_json directory not found"
+        })
+    
+    results = scan_and_register_packs(pack_json_dir)
+    
+    return JSONResponse(status_code=200, content={
+        "message": "Pack registration complete",
+        "added": results["added"],
+        "skipped": results["skipped"],
+        "errors": results["errors"],
+        "summary": {
+            "added_count": len(results["added"]),
+            "skipped_count": len(results["skipped"]),
+            "error_count": len(results["errors"])
+        }
+    })
+
+
 @app.post("/open_pack")
 async def open_pack(req: OpenPackRequest):
     """Open a pack. If pack_name provided, opens that type. Otherwise opens most recent."""
@@ -188,7 +230,7 @@ async def open_pack(req: OpenPackRequest):
     add_cards_to_collection(row['uuid'], cards)
     
     # Convert cards to JSON-serializable format
-    cards_data = [{"name": card.name, "rarity": card.rarity} for card in cards]
+    cards_data = [{"card_name": card.card_name, "rarity": card.rarity} for card in cards]
     
     return JSONResponse(status_code=201, content={
         "message": "Opened Pack Successfully",

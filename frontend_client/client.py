@@ -702,13 +702,14 @@ def main():
                             
                             if "error" in response:
                                 print(f"Error: {response['error']}")
+                                break
                             elif "cards" in response:
                                 print_border()
                                 print(f"Opened {response.get('pack_name', 'Pack')}! You got:")
                                 print_border()
                                 for card in response['cards']:
                                     rarity_tag = f"[{card['rarity'].upper()}]"
-                                    print(f"  {rarity_tag} {card['name']}")
+                                    print(f"  {rarity_tag} {card['card_name']}")
                                 print_border()
                             else:
                                 print(f"Response: {response}")

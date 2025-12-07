@@ -1,7 +1,10 @@
 import sqlite3
 from pathlib import Path
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, TYPE_CHECKING
 import datetime
+
+if TYPE_CHECKING:
+    from ..card_utils.card import Card
 
 DB_PATH = Path("../db/CardPack_DB.db")
 
@@ -63,6 +66,26 @@ def init_db():
         FOREIGN KEY(uuid) REFERENCES Users(uuid)
     );
     """)
+
+    # Packs Table - Available pack types for purchase
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS Packs (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        pack_name TEXT NOT NULL UNIQUE,
+        pack_path TEXT NOT NULL,
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP
+    );
+    """)
+
+    # Seed default packs if table is empty
+    cursor.execute("SELECT COUNT(*) as count FROM Packs")
+    if cursor.fetchone()['count'] == 0:
+        cursor.executemany("""
+            INSERT INTO Packs (pack_name, pack_path) VALUES (?, ?)
+        """, [
+            ("Music Pack Vol 1", "/music/music_pack_vol_1.json"),
+            ("Food Pack Vol 1", "/food/food_pack_vol_1.json")
+        ])
 
     conn.commit()
     conn.close()
@@ -216,7 +239,7 @@ def add_card_to_collection(user_uuid: str, card_name: str, rarity: str) -> bool:
 def add_cards_to_collection(user_uuid: str, cards: list) -> bool:
     """
     Save multiple opened cards to the user's CardsOpened collection.
-    cards: list of Card objects with .name and .rarity attributes
+    cards: list of Card objects with .card_name and .rarity attributes
     """
     conn = get_db_connection()
     cursor = conn.cursor()
@@ -225,7 +248,7 @@ def add_cards_to_collection(user_uuid: str, cards: list) -> bool:
             cursor.execute("""
                 INSERT INTO CardsOpened (uuid, card_name, rarity)
                 VALUES (?, ?, ?)
-            """, (user_uuid, card.name, card.rarity))
+            """, (user_uuid, card.card_name, card.rarity))
         conn.commit()
         return True
     except Exception as e:
@@ -281,6 +304,7 @@ def get_user_inventory(user_uuid: str) -> list:
     finally:
         conn.close()
 
+
 def select_card_by_name(user_uuid: str, card_name:str):
     conn = get_db_connection()  
     cursor = conn.cursor()
@@ -317,12 +341,14 @@ def select_card_by_name(user_uuid: str, card_name:str):
     finally:
         conn.close()
 
-from ..card_utils.card import Card
-
+from card_utils.card import Card
 
 # swap hands basically
-# swap hands basically
-def change_card_ownership(seller_uuid:str, buyer_uuid:str, card:Card):
+def change_card_ownership(seller_uuid: str, buyer_uuid: str, card: "Card"):
+    """
+    Transfer card ownership from seller to buyer.
+    card: Card object with card_name and rarity attributes
+    """
     card_name = card.card_name
     card_rarity = card.rarity
 
@@ -367,6 +393,204 @@ def change_money(amount: int, account_uuid: str) -> bool:
         if not non_negative_check(amount, account_uuid):
             print("Transaction failed: not enough balance!")
             return False
+def open_pack_for_user(user_uuid: str, pack_name: Optional[str] = None) -> Optional[Dict[str, Any]]:
+    """
+    Open a pack for a user. If pack_name is provided, open that specific pack type.
+    If pack_name is None, open the most recently acquired pack.
+    Returns dict with pack info (id, pack_name, pack_path) or None if no pack available.
+    """
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        if pack_name:
+            # Open specific pack type
+            cursor.execute("""
+                SELECT id, qty, pack_path, pack_name 
+                FROM Inventory 
+                WHERE uuid = ? AND pack_name = ? AND qty > 0 
+                LIMIT 1
+            """, (user_uuid, pack_name))
+        else:
+            # Open most recently acquired pack
+            cursor.execute("""
+                SELECT id, qty, pack_path, pack_name 
+                FROM Inventory 
+                WHERE uuid = ? AND qty > 0 
+                ORDER BY created_at DESC 
+                LIMIT 1
+            """, (user_uuid,))
+        
+        row = cursor.fetchone()
+        
+        if not row or row['qty'] <= 0:
+            # Debug: Check what's in the inventory
+            cursor.execute("""
+                SELECT pack_name, qty FROM Inventory WHERE uuid = ?
+            """, (user_uuid,))
+            all_packs = cursor.fetchall()
+            print(f"DEBUG: User inventory: {[dict(p) for p in all_packs]}")
+            print(f"DEBUG: Looking for pack_name: '{pack_name}'")
+            return None
+        
+        # Decrement quantity
+        pack_id = row['id']
+        new_qty = row['qty'] - 1
+        cursor.execute("UPDATE Inventory SET qty = ? WHERE id = ?", (new_qty, pack_id))
+        conn.commit()
+        
+        return {
+            'id': row['id'],
+            'pack_name': row['pack_name'],
+            'pack_path': row['pack_path'],
+            'qty_remaining': new_qty
+        }
+        
+    except Exception as e:
+        print(f"Error opening pack: {e}")
+        conn.rollback()
+        return None
+    finally:
+        conn.close()
+
+
+def add_pack_to_inventory(user_uuid: str, pack_name: str, pack_path: str) -> bool:
+    """
+    Add a pack to user's inventory. If pack already exists, increment qty.
+    """
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute("""
+            SELECT id, qty FROM Inventory 
+            WHERE uuid = ? AND pack_name = ?
+        """, (user_uuid, pack_name))
+        
+        row = cursor.fetchone()
+        
+        if row:
+            new_qty = row['qty'] + 1
+            cursor.execute("UPDATE Inventory SET qty = ? WHERE id = ?", (new_qty, row['id']))
+        else:
+            cursor.execute("""
+                INSERT INTO Inventory (uuid, pack_name, pack_path, qty)
+                VALUES (?, ?, ?, 1)
+            """, (user_uuid, pack_name, pack_path))
+            
+        conn.commit()
+        return True
+        
+    except Exception as e:
+        print(f"Error adding pack to inventory: {e}")
+        return False
+    finally:
+        conn.close()
+
+
+def get_available_packs() -> Dict[str, str]:
+    """
+    Query the Packs table to get all available pack types.
+    Returns dict of pack_name -> pack_path.
+    """
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute("SELECT pack_name, pack_path FROM Packs")
+        rows = cursor.fetchall()
+        return {row['pack_name']: row['pack_path'] for row in rows}
+    except Exception as e:
+        print(f"Error getting available packs: {e}")
+        return {}
+    finally:
+        conn.close()
+
+
+def add_pack_type(pack_name: str, pack_path: str) -> bool:
+    """
+    Add a new pack type to the Packs table.
+    """
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute("""
+            INSERT INTO Packs (pack_name, pack_path) VALUES (?, ?)
+        """, (pack_name, pack_path))
+        conn.commit()
+        return True
+    except Exception as e:
+        print(f"Error adding pack type: {e}")
+        return False
+    finally:
+        conn.close()
+
+
+def scan_and_register_packs(pack_json_dir: Path) -> Dict[str, Any]:
+    """
+    Scan pack_json directory and register any new packs not in the Packs table.
+    Returns dict with stats about packs added, skipped, and errors.
+    """
+    import json
+    
+    results = {
+        "added": [],
+        "skipped": [],
+        "errors": []
+    }
+    
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    
+    try:
+        # Get existing packs from database
+        cursor.execute("SELECT pack_name FROM Packs")
+        existing_packs = {row['pack_name'] for row in cursor.fetchall()}
+        
+        # Scan all subdirectories in pack_json
+        for category_dir in pack_json_dir.iterdir():
+            if not category_dir.is_dir():
+                continue
+                
+            category = category_dir.name
+            
+            # Check each JSON file in the category
+            for json_file in category_dir.glob("*.json"):
+                try:
+                    # Read pack metadata from JSON
+                    with open(json_file, 'r') as f:
+                        pack_data = json.load(f)
+                    
+                    pack_name = pack_data.get('pack_name')
+                    if not pack_name:
+                        results["errors"].append(f"{json_file.name}: No pack_name in JSON")
+                        continue
+                    
+                    # Check if already registered
+                    if pack_name in existing_packs:
+                        results["skipped"].append(pack_name)
+                        continue
+                    
+                    # Register new pack
+                    pack_path = f"/{category}/{json_file.name}"
+                    cursor.execute("""
+                        INSERT INTO Packs (pack_name, pack_path) VALUES (?, ?)
+                    """, (pack_name, pack_path))
+                    results["added"].append(pack_name)
+                    
+                except json.JSONDecodeError:
+                    results["errors"].append(f"{json_file.name}: Invalid JSON")
+                except Exception as e:
+                    results["errors"].append(f"{json_file.name}: {str(e)}")
+        
+        conn.commit()
+        
+    except Exception as e:
+        results["errors"].append(f"Database error: {str(e)}")
+    finally:
+        conn.close()
+    
+    return results
+
+
+# @EmiF1
 
         cursor.execute("""
             UPDATE Bank
@@ -450,3 +674,92 @@ def non_negative_check(amount: int, account_uuid: str) -> bool:
 #   2. sleep until midnight (that found time)
 #   3. at midnight, uuids_logged... = set()
 #   4. wait until next midnight, repeat.
+
+def querey_marketplace(ammount:int = 10, card_names: list[str] = None, rarities: list[str] = None, price_min: int = None, price_max: int = None):
+
+    # take from the Marketplace table
+    conn = get_db_connection()  
+    cursor = conn.cursor()
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        sql = "SELECT id, seller_uuid, card_name, rarity, price, created_at FROM Marketplace"
+        clauses = []
+        params = []
+
+        if card_names:
+            placeholders = ",".join("?" for _ in card_names)
+            clauses.append(f"card_name IN ({placeholders})")
+            params.extend(card_names)
+
+        if rarities:
+            placeholders = ",".join("?" for _ in rarities)
+            clauses.append(f"rarity IN ({placeholders})")
+            params.extend(rarities)
+
+        if price_min is not None:
+            clauses.append("price >= ?")
+            params.append(price_min)
+
+        if price_max is not None:
+            clauses.append("price <= ?")
+            params.append(price_max)
+
+        if clauses:
+            sql += " WHERE " + " AND ".join(clauses)
+
+        sql += " ORDER BY price ASC, created_at DESC LIMIT ?"
+        params.append(ammount)
+
+        cursor.execute(sql, params)
+        rows = cursor.fetchall()
+        return [dict(r) for r in rows]
+    except Exception as e:
+        print(f"Error querying marketplace: {e}")
+        return []
+    finally:
+        conn.close()
+
+
+def add_to_marketplace(user_uuid: str, card_name: list[str] = None, rarity: list[str] = None, price:int = None) -> bool:
+    """
+    Save a single opened card to the user's CardsOpened collection.
+    """
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute("""
+            INSERT INTO Marketplace (uuid, card_name, rarity, price)
+            VALUES (?, ?, ?, ?)
+        """, (user_uuid, card_name, rarity))
+        conn.commit()
+        return True
+    except Exception as e:
+        print(f"Error adding card Marketplace: {e}")
+        return False
+    finally:
+        conn.close()
+
+
+def remove_from_marketplace(user_uuid: str, card_name: str, rarity: str, price:int) -> bool:
+    """
+    Remove a listing from the marketplace by card_name and rarity owned by user_uuid.
+    Removes the first matching listing.
+    """
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute("""
+            DELETE FROM Marketplace
+            WHERE seller_uuid = ? AND card_name = ? AND rarity = ? AND price = ?
+            LIMIT 1
+        """, (user_uuid, card_name, rarity, price))
+        
+        conn.commit()
+        return cursor.rowcount > 0  # True if a row was deleted
+    except Exception as e:
+        print(f"Error removing card from marketplace: {e}")
+        return False
+    finally:
+        conn.close()
+

@@ -1,0 +1,12 @@
+{
+    "pack_name": "Food Pack Vol 1",
+    "card_distribution": {
+        "Pizza": {"prob": 0.35, "rarity": "common"},
+        "Burger": {"prob": 0.30, "rarity": "common"},
+        "Sushi": {"prob": 0.15, "rarity": "rare"},
+        "Ribeye Steak": {"prob": 0.10, "rarity": "rare"},
+        "Truffle": {"prob": 0.07, "rarity": "epic"},
+        "Almas Caviar": {"prob": 0.03, "rarity": "legendary"}
+    },
+    "total_cards": 10
+}

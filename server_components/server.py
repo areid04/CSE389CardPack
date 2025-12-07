@@ -13,7 +13,7 @@ import uuid
 from datetime import datetime
 
 # import dataclasses
-from server_classes import CreateUser, LoginUser, Email
+from server_classes import CreateUser, LoginUser, Email, OpenPackRequest, AddPackRequest
 
 # import our DB access functions
 from utils.db_access import (
@@ -23,7 +23,11 @@ from utils.db_access import (
     create_user_entry,
     add_cards_to_collection,
     get_user_cards,
-    get_user_inventory
+    get_user_inventory,
+    open_pack_for_user,
+    add_pack_to_inventory,
+    get_available_packs,
+    scan_and_register_packs
 )
 
 app = FastAPI()
@@ -33,6 +37,16 @@ app = FastAPI()
 async def startup_event():
     # Initialize the SQLite DB defined in the schema
     init_db()
+    
+    # Auto-register any new packs from pack_json directory
+    from pathlib import Path
+    pack_json_dir = Path(__file__).parent / "pack_json"
+    if pack_json_dir.exists():
+        results = scan_and_register_packs(pack_json_dir)
+        if results["added"]:
+            print(f"Auto-registered {len(results['added'])} new pack(s): {', '.join(results['added'])}")
+        elif results["errors"]:
+            print(f"Pack registration errors: {results['errors']}")
 
 @app.get("/")
 async def read_root():
@@ -89,9 +103,13 @@ async def signup_user(user: CreateUser):
     
     success = create_user_entry(user_data)
 
-    # TODO: generate a card pack for the new user -> Insert into Inventory Table here
-    from utils.db_access import add_default_pack
-    add_default_pack(new_uuid)
+    # Give new user a random starter pack
+    import random
+    available = get_available_packs()
+    if available:
+        pack_name = random.choice(list(available.keys()))
+        pack_path = available[pack_name]
+        add_pack_to_inventory(new_uuid, pack_name, pack_path)
 
     if success:
         return JSONResponse(status_code=201, content={"message": "User created successfully", "uuid": new_uuid})
@@ -99,43 +117,126 @@ async def signup_user(user: CreateUser):
         return JSONResponse(status_code=500, content={"error": "Failed to create user"})
 
 
-# debug example endpoint, some one make a more general "buy a card pack" endpoint please 
+# debug example endpoint - will be replaced with marketplace
 @app.post("/gen_default_pack")
 async def debug_gen(email: Email):
-    from utils.db_access import get_user_by_email
+    import random
     row = get_user_by_email(email.email)
+    if not row:
+        return JSONResponse(status_code=404, content={"error": "User not found"})
+    
+    # Randomly pick from available packs
+    available = get_available_packs()
+    if not available:
+        return JSONResponse(status_code=500, content={"error": "No packs available"})
+    
+    pack_name = random.choice(list(available.keys()))
+    pack_path = available[pack_name]
+    
+    add_pack_to_inventory(row['uuid'], pack_name, pack_path)
+    return JSONResponse(status_code=201, content={
+        "message": f"Pack added successfully",
+        "pack_name": pack_name
+    })
 
-    # add to the inventory
-    from utils.db_access import add_default_pack
-    add_default_pack(row['uuid'])
-    return JSONResponse(status_code=201, content={"message": "User created successfully"})
 
-# debug example endpoint
-
-@app.post("/open_pack")
-async def debug_open(email: Email):
-    from utils.db_access import open_default_pack
-    from utils.db_access import get_user_by_email
-    row = get_user_by_email(email.email)
-    result = open_default_pack(row['uuid'])
-    if (result != False): # we should have gotten a path
-        from card_utils.pack_utils import pack_from_path
-        pack = pack_from_path(result)
-        # pack object
-        cards = pack.open_pack()
-        
-        # Save opened cards to user's collection
-        add_cards_to_collection(row['uuid'], cards)
-        
-        # Convert cards to JSON-serializable format
-        cards_data = [{"name": card.name, "rarity": card.rarity} for card in cards]
-        
+@app.post("/add_pack")
+async def add_pack(req: AddPackRequest):
+    """Add a specific pack type to user's inventory."""
+    row = get_user_by_email(req.email)
+    if not row:
+        return JSONResponse(status_code=404, content={"error": "User not found"})
+    
+    available = get_available_packs()
+    if req.pack_name not in available:
+        return JSONResponse(status_code=400, content={
+            "error": f"Invalid pack name. Available packs: {list(available.keys())}"
+        })
+    
+    pack_path = available[req.pack_name]
+    success = add_pack_to_inventory(row['uuid'], req.pack_name, pack_path)
+    
+    if success:
         return JSONResponse(status_code=201, content={
-            "message": "Opened Pack Successfully",
-            "cards": cards_data
+            "message": f"{req.pack_name} added to inventory"
         })
     else:
-        return JSONResponse(status_code=401, content={"message": "Could Not Open Pack; do you really have this?"})
+        return JSONResponse(status_code=500, content={"error": "Failed to add pack"})
+
+
+@app.get("/available_packs")
+async def list_available_packs():
+    """List all pack types available for purchase."""
+    return JSONResponse(status_code=200, content={
+        "packs": list(get_available_packs().keys())
+    })
+
+
+@app.post("/admin/register_packs")
+async def register_packs_from_directory():
+    """
+    Admin endpoint: Scan pack_json directory and register any new packs.
+    Returns stats about packs added, skipped, and errors.
+    """
+    from pathlib import Path
+    
+    # Get the pack_json directory path
+    pack_json_dir = Path(__file__).parent / "pack_json"
+    
+    if not pack_json_dir.exists():
+        return JSONResponse(status_code=500, content={
+            "error": "pack_json directory not found"
+        })
+    
+    results = scan_and_register_packs(pack_json_dir)
+    
+    return JSONResponse(status_code=200, content={
+        "message": "Pack registration complete",
+        "added": results["added"],
+        "skipped": results["skipped"],
+        "errors": results["errors"],
+        "summary": {
+            "added_count": len(results["added"]),
+            "skipped_count": len(results["skipped"]),
+            "error_count": len(results["errors"])
+        }
+    })
+
+
+@app.post("/open_pack")
+async def open_pack(req: OpenPackRequest):
+    """Open a pack. If pack_name provided, opens that type. Otherwise opens most recent."""
+    row = get_user_by_email(req.email)
+    if not row:
+        return JSONResponse(status_code=404, content={"error": "User not found"})
+    
+    pack_result = open_pack_for_user(row['uuid'], req.pack_name)
+    
+    if not pack_result:
+        if req.pack_name:
+            return JSONResponse(status_code=400, content={
+                "error": f"You don't have any '{req.pack_name}' packs"
+            })
+        else:
+            return JSONResponse(status_code=400, content={
+                "error": "You don't have any packs to open"
+            })
+    
+    from card_utils.pack_utils import pack_from_path
+    pack = pack_from_path(pack_result['pack_path'])
+    cards = pack.open_pack()
+    
+    # Save opened cards to user's collection
+    add_cards_to_collection(row['uuid'], cards)
+    
+    # Convert cards to JSON-serializable format
+    cards_data = [{"card_name": card.card_name, "rarity": card.rarity} for card in cards]
+    
+    return JSONResponse(status_code=201, content={
+        "message": "Opened Pack Successfully",
+        "pack_name": pack_result['pack_name'],
+        "cards": cards_data
+    })
 
 
 @app.post("/my_cards")

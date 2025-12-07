@@ -341,7 +341,7 @@ def select_card_by_name(user_uuid: str, card_name:str):
     finally:
         conn.close()
 
-from card_utils.card import Card
+from server_components.card_utils.card import Card
 
 # swap hands basically
 def change_card_ownership(seller_uuid: str, buyer_uuid: str, card: "Card"):
@@ -385,14 +385,7 @@ def change_card_ownership(seller_uuid: str, buyer_uuid: str, card: "Card"):
         conn.close()
 
 
-def change_money(amount: int, account_uuid: str) -> bool:
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    try:
-        # Negative balance
-        if not non_negative_check(amount, account_uuid):
-            print("Transaction failed: not enough balance!")
-            return False
+
 def open_pack_for_user(user_uuid: str, pack_name: Optional[str] = None) -> Optional[Dict[str, Any]]:
     """
     Open a pack for a user. If pack_name is provided, open that specific pack type.
@@ -591,7 +584,14 @@ def scan_and_register_packs(pack_json_dir: Path) -> Dict[str, Any]:
 
 
 # @EmiF1
-
+def change_money(amount: int, account_uuid: str) -> bool:
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        # Negative balance
+        if not non_negative_check(amount, account_uuid):
+            print("Transaction failed: not enough balance!")
+            return False
         cursor.execute("""
             UPDATE Bank
             SET balance = balance + ?

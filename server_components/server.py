@@ -2,7 +2,7 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.responses import JSONResponse
 import uuid
 from datetime import datetime
-from card_utils.card import Card
+from server_components.card_utils.card import Card
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException
 from dataclasses import dataclass, field
 from collections import deque
@@ -13,10 +13,10 @@ import uuid
 from datetime import datetime
 
 # import dataclasses
-from server_classes import CreateUser, LoginUser, Email, OpenPackRequest, AddPackRequest
+from server_components.server_classes import CreateUser, LoginUser, Email, OpenPackRequest, AddPackRequest
 
 # import our DB access functions
-from utils.db_access import (
+from server_components.utils.db_access import (
     init_db, 
     get_user_by_email, 
     get_user_by_username, 
@@ -636,23 +636,6 @@ async def websocket_auction_room(
 
 
         
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 
 

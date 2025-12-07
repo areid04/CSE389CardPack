@@ -12,6 +12,8 @@ import json
 import uuid
 from datetime import datetime
 
+from pydantic import BaseModel
+
 # import dataclasses
 from server_components.server_classes import CreateUser, LoginUser, Email, OpenPackRequest, AddPackRequest
 
@@ -27,7 +29,10 @@ from server_components.utils.db_access import (
     open_pack_for_user,
     add_pack_to_inventory,
     get_available_packs,
-    scan_and_register_packs
+    scan_and_register_packs,
+    change_money,
+    exchange_money,
+    create_bank_account
 )
 
 app = FastAPI()
@@ -75,6 +80,9 @@ async def login_user(user: LoginUser):
                 "email": existing_user['email']
             })
 
+# Add this near the top of server.py with other imports/constants
+STARTING_BALANCE = 100
+
 @app.post("/signup")
 async def signup_user(user: CreateUser):
     # check that there is a username, email, and password otherwise fail
@@ -103,6 +111,12 @@ async def signup_user(user: CreateUser):
     
     success = create_user_entry(user_data)
 
+    if not success:
+        return JSONResponse(status_code=500, content={"error": "Failed to create user"})
+
+    # Create bank account for new user
+    create_bank_account(new_uuid, STARTING_BALANCE)
+
     # Give new user a random starter pack
     import random
     available = get_available_packs()
@@ -111,10 +125,10 @@ async def signup_user(user: CreateUser):
         pack_path = available[pack_name]
         add_pack_to_inventory(new_uuid, pack_name, pack_path)
 
-    if success:
-        return JSONResponse(status_code=201, content={"message": "User created successfully", "uuid": new_uuid})
-    else:
-        return JSONResponse(status_code=500, content={"error": "Failed to create user"})
+    return JSONResponse(status_code=201, content={
+        "message": "User created successfully", 
+        "uuid": new_uuid,
+    })
 
 
 # debug example endpoint - will be replaced with marketplace
@@ -222,7 +236,7 @@ async def open_pack(req: OpenPackRequest):
                 "error": "You don't have any packs to open"
             })
     
-    from card_utils.pack_utils import pack_from_path
+    from server_components.card_utils.pack_utils import pack_from_path
     pack = pack_from_path(pack_result['pack_path'])
     cards = pack.open_pack()
     
@@ -266,6 +280,120 @@ async def get_my_packs(email: Email):
         "packs": packs,
         "total_packs": sum(pack['qty'] for pack in packs)
     })
+
+
+
+class ChangeMoneyRequest(BaseModel):
+    email: str
+    amount: int
+
+class ExchangeMoneyRequest(BaseModel):
+    giver_email: str
+    taker_email: str
+    amount: int
+
+class GetBalanceRequest(BaseModel):
+    email: str
+
+
+# Debug endpoints for banking functions
+
+@app.post("/debug/get_balance")
+async def debug_get_balance(req: GetBalanceRequest):
+    """Get a user's current balance."""
+    row = get_user_by_email(req.email)
+    if not row:
+        return JSONResponse(status_code=404, content={"error": "User not found"})
+    
+    from server_components.utils.db_access import get_db_connection
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute("SELECT money FROM Bank WHERE uuid = ?", (row['uuid'],))
+        bank_row = cursor.fetchone()
+        if not bank_row:
+            return JSONResponse(status_code=404, content={"error": "Bank account not found"})
+        return JSONResponse(status_code=200, content={
+            "email": req.email,
+            "uuid": row['uuid'],
+            "money": bank_row['money']
+        })
+    finally:
+        conn.close()
+
+
+@app.post("/debug/change_money")
+async def debug_change_money(req: ChangeMoneyRequest):
+    """Add or remove money from a user's account. Use negative amounts to subtract."""
+    row = get_user_by_email(req.email)
+    if not row:
+        return JSONResponse(status_code=404, content={"error": "User not found"})
+    
+    from server_components.utils.db_access import change_money
+    success = change_money(req.amount, row['uuid'])
+    
+    if success:
+        return JSONResponse(status_code=200, content={
+            "message": f"Balance changed by {req.amount}",
+            "uuid": row['uuid']
+        })
+    else:
+        return JSONResponse(status_code=400, content={
+            "error": "Transaction failed (insufficient balance or account not found)"
+        })
+
+
+@app.post("/debug/exchange_money")
+async def debug_exchange_money(req: ExchangeMoneyRequest):
+    """Transfer money from one user to another."""
+    giver = get_user_by_email(req.giver_email)
+    taker = get_user_by_email(req.taker_email)
+    
+    if not giver:
+        return JSONResponse(status_code=404, content={"error": "Giver not found"})
+    if not taker:
+        return JSONResponse(status_code=404, content={"error": "Taker not found"})
+    if req.amount <= 0:
+        return JSONResponse(status_code=400, content={"error": "Amount must be positive"})
+    
+    from server_components.utils.db_access import exchange_money
+    success = exchange_money(giver['uuid'], taker['uuid'], req.amount)
+    
+    if success:
+        return JSONResponse(status_code=200, content={
+            "message": f"Transferred {req.amount} from {req.giver_email} to {req.taker_email}",
+            "giver_uuid": giver['uuid'],
+            "taker_uuid": taker['uuid']
+        })
+    else:
+        return JSONResponse(status_code=400, content={
+            "error": "Transfer failed (insufficient balance or account not found)"
+        })
+
+
+@app.post("/debug/set_balance")
+async def debug_set_balance(req: ChangeMoneyRequest):
+    """Directly set a user's balance (bypasses checks - debug only)."""
+    row = get_user_by_email(req.email)
+    if not row:
+        return JSONResponse(status_code=404, content={"error": "User not found"})
+    
+    from server_components.utils.db_access import get_db_connection
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute("""
+            UPDATE Bank SET balance = ? WHERE uuid = ?
+        """, (req.amount, row['uuid']))
+        conn.commit()
+        return JSONResponse(status_code=200, content={
+            "message": f"Balance set to {req.amount}",
+            "uuid": row['uuid']
+        })
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"error": str(e)})
+    finally:
+        conn.close()
 
 @dataclass
 class AuctionItem:
@@ -571,7 +699,7 @@ class ListItemRequest(BaseModel):
 async def list_item(request: ListItemRequest):
     """REST endpoint to list an item for auction"""
     # Get card from database 
-    from utils.db_access import select_card_by_name
+    from server_components.utils.db_access import select_card_by_name
     card = select_card_by_name(request.seller_uuid, request.card_name)
     classed_card = Card(card["card_name"], card["rarity"])
     

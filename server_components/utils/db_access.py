@@ -6,7 +6,7 @@ import datetime
 if TYPE_CHECKING:
     from ..card_utils.card import Card
 
-DB_PATH = Path("../db/CardPack_DB.db")
+DB_PATH = Path("./db/CardPack_DB.db")
 
 def get_db_connection():
     conn = sqlite3.connect(DB_PATH)
@@ -39,6 +39,15 @@ def init_db():
         password TEXT,
         is_admin BOOLEAN DEFAULT 0,
         inv BLOB
+    );
+    """)
+
+    # bank
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS Bank (
+        uuid TEXT NOT NULL PRIMARY KEY,
+        money INTEGER NOT NULL DEFAULT 0,
+        FOREIGN KEY(uuid) REFERENCES Users(uuid)
     );
     """)
 
@@ -588,13 +597,13 @@ def change_money(amount: int, account_uuid: str) -> bool:
     conn = get_db_connection()
     cursor = conn.cursor()
     try:
-        # Negative balance
+        # Negative money
         if not non_negative_check(amount, account_uuid):
-            print("Transaction failed: not enough balance!")
+            print("Transaction failed: not enough money!")
             return False
         cursor.execute("""
             UPDATE Bank
-            SET balance = balance + ?
+            SET money = money + ?
             WHERE uuid = ?
         """, (amount, account_uuid))
 
@@ -611,22 +620,22 @@ def exchange_money(giver_uuid: str, taker_uuid: str, amount: int) -> bool:
     cursor = conn.cursor()
 
     try:
-        # Check for enough balance
+        # Check for enough money
         if not non_negative_check(-amount, giver_uuid):
             print("Trade failed: not have enough money!")
             return False
 
-        # Remove balance
+        # Remove money
         cursor.execute("""
             UPDATE Bank
-            SET balance = balance - ?
+            SET money = money - ?
             WHERE uuid = ?
         """, (amount, giver_uuid))
 
-        # Add balance
+        # Add money
         cursor.execute("""
             UPDATE Bank
-            SET balance = balance + ?
+            SET money = money + ?
             WHERE uuid = ?
         """, (amount, taker_uuid))
 
@@ -642,14 +651,14 @@ def non_negative_check(amount: int, account_uuid: str) -> bool:
     conn = get_db_connection()
     cursor = conn.cursor()
     try:
-        cursor.execute("SELECT balance FROM Bank WHERE uuid = ?", (account_uuid,))
+        cursor.execute("SELECT money FROM Bank WHERE uuid = ?", (account_uuid,))
         row = cursor.fetchone()
         if not row:
             print("Bank account not found.")
             return False
         
-        current_balance = row["balance"]
-        return current_balance + amount >= 0
+        current_money = row["money"]
+        return current_money + amount >= 0
     except Exception as e:
         print(f"Error in non_negative_check: {e}")
         return False
@@ -763,3 +772,15 @@ def remove_from_marketplace(user_uuid: str, card_name: str, rarity: str, price:i
     finally:
         conn.close()
 
+def create_bank_account(user_uuid: str, starting_balance: int = 100) -> bool:
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute("INSERT INTO Bank (uuid, money) VALUES (?, ?)", (user_uuid, starting_balance))
+        conn.commit()
+        return True
+    except Exception as e:
+        print(f"Error creating bank account: {e}")
+        return False
+    finally:
+        conn.close()

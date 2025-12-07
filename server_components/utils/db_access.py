@@ -359,19 +359,78 @@ def change_card_ownership(seller_uuid:str, buyer_uuid:str, card:Card):
         conn.close()
 
 
-# @EmiF1
+def change_money(amount: int, account_uuid: str) -> bool:
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        # Negative balance
+        if not non_negative_check(amount, account_uuid):
+            print("Transaction failed: not enough balance!")
+            return False
 
-def change_money(ammount: int, account_uuid:str):
-    # update Bank table based on this function call
-    pass
+        cursor.execute("""
+            UPDATE Bank
+            SET balance = balance + ?
+            WHERE uuid = ?
+        """, (amount, account_uuid))
 
-def exchange_money(giver_uuid: str, taker_uuid: str):
-    # update bank table from one end to the other
-    pass
+        conn.commit()
+        return True
+    except Exception as e:
+        print(f"Error changing money: {e}")
+        return False
+    finally:
+        conn.close()
 
-def non_negative_check(ammount: int, account_uuid: str):
-    # check this does not lead to a negative balance
-    pass
+def exchange_money(giver_uuid: str, taker_uuid: str, amount: int) -> bool:
+    conn = get_db_connection()
+    cursor = conn.cursor()
+
+    try:
+        # Check for enough balance
+        if not non_negative_check(-amount, giver_uuid):
+            print("Trade failed: not have enough money!")
+            return False
+
+        # Remove balance
+        cursor.execute("""
+            UPDATE Bank
+            SET balance = balance - ?
+            WHERE uuid = ?
+        """, (amount, giver_uuid))
+
+        # Add balance
+        cursor.execute("""
+            UPDATE Bank
+            SET balance = balance + ?
+            WHERE uuid = ?
+        """, (amount, taker_uuid))
+
+        conn.commit()
+        return True
+    except Exception as e:
+        print(f"Error exchanging money: {e}")
+        return False
+    finally:
+        conn.close()
+
+def non_negative_check(amount: int, account_uuid: str) -> bool:
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute("SELECT balance FROM Bank WHERE uuid = ?", (account_uuid,))
+        row = cursor.fetchone()
+        if not row:
+            print("Bank account not found.")
+            return False
+        
+        current_balance = row["balance"]
+        return current_balance + amount >= 0
+    except Exception as e:
+        print(f"Error in non_negative_check: {e}")
+        return False
+    finally:
+        conn.close()
 
 # another nice thing to have would be a daily-login cash bonus!
 

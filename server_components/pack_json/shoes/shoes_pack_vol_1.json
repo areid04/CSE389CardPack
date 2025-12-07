@@ -1,0 +1,12 @@
+{
+    "pack_name": "Shoes Pack Vol 1",
+    "card_distribution": {
+        "Nike Air Force 1": {"prob": 0.40, "rarity": "common"},
+        "Adidas Ultraboost": {"prob": 0.30, "rarity": "common"},
+        "Converse Chuck Taylor": {"prob": 0.15, "rarity": "rare"},
+        "Jordan 1 Retro": {"prob": 0.10, "rarity": "rare"},
+        "Yeezy Boost 350": {"prob": 0.04, "rarity": "epic"},
+        "Nike Mag Back to the Future": {"prob": 0.01, "rarity": "legendary"}
+    },
+    "total_cards": 5
+}

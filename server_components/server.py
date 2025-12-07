@@ -33,7 +33,11 @@ from server_components.utils.db_access import (
     scan_and_register_packs,
     change_money,
     exchange_money,
-    create_bank_account
+    create_bank_account,
+    querey_marketplace,
+    add_to_marketplace,
+    remove_from_marketplace,
+    select_card_by_name
 )
 
 app = FastAPI()
@@ -772,7 +776,99 @@ async def websocket_auction_room(
         await room.disconnect(user_uuid)
 
 
-        
+class MarketListRequest(BaseModel):
+    email: str
+    card_name: str
+    rarity: str
+    price: int
+
+class MarketBuyRequest(BaseModel):
+    email: str
+    listing_id: int
+
+class MarketSearchRequest(BaseModel):
+    card_names: list[str] | None = None
+    rarities: list[str] | None = None
+    price_min: int | None = None
+    price_max: int | None = None
+    limit: int = 10
+
+
+@app.post("/marketplace/list")
+async def marketplace_list(req: MarketListRequest):
+    """List a card for sale on the marketplace."""
+    user = get_user_by_email(req.email)
+    if not user:
+        return JSONResponse(status_code=404, content={"error": "User not found"})
+    
+    # Check user owns this card
+    card = select_card_by_name(user['uuid'], req.card_name)
+    if not card or card['rarity'] != req.rarity:
+        return JSONResponse(status_code=400, content={"error": "You don't own this card"})
+    
+    if req.price <= 0:
+        return JSONResponse(status_code=400, content={"error": "Price must be positive"})
+    
+    success = add_to_marketplace(user['uuid'], req.card_name, req.rarity, req.price)
+    if success:
+        return JSONResponse(status_code=201, content={"message": "Card listed successfully"})
+    return JSONResponse(status_code=500, content={"error": "Failed to list card"})
+
+
+@app.post("/marketplace/search")
+async def marketplace_search(req: MarketSearchRequest):
+    """Search marketplace listings."""
+    listings = querey_marketplace(
+        ammount=req.limit,
+        card_names=req.card_names,
+        rarities=req.rarities,
+        price_min=req.price_min,
+        price_max=req.price_max
+    )
+    return JSONResponse(status_code=200, content={"listings": listings, "count": len(listings)})
+
+
+@app.post("/marketplace/buy")
+async def marketplace_buy(req: MarketBuyRequest):
+    """Buy a card from the marketplace."""
+    buyer = get_user_by_email(req.email)
+    if not buyer:
+        return JSONResponse(status_code=404, content={"error": "User not found"})
+    
+    # Get the listing
+    from server_components.utils.db_access import get_db_connection
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT * FROM Marketplace WHERE id = ?", (req.listing_id,))
+    listing = cursor.fetchone()
+    conn.close()
+    
+    if not listing:
+        return JSONResponse(status_code=404, content={"error": "Listing not found"})
+    
+    listing = dict(listing)
+    seller_uuid = listing['seller_uuid']
+    
+    if buyer['uuid'] == seller_uuid:
+        return JSONResponse(status_code=400, content={"error": "Cannot buy your own listing"})
+    
+    # Transfer money (buyer -> seller)
+    if not exchange_money(buyer['uuid'], seller_uuid, listing['price']):
+        return JSONResponse(status_code=400, content={"error": "Insufficient funds"})
+    
+    # Transfer card ownership
+    card = Card(listing['card_name'], listing['rarity'])
+    from server_components.utils.db_access import change_card_ownership
+    change_card_ownership(seller_uuid, buyer['uuid'], card)
+    
+    # Remove listing
+    remove_from_marketplace(seller_uuid, listing['card_name'], listing['rarity'], listing['price'])
+    
+    return JSONResponse(status_code=200, content={
+        "message": "Purchase successful",
+        "card_name": listing['card_name'],
+        "price": listing['price']
+    })  
 
 
 

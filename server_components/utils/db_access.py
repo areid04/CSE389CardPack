@@ -86,6 +86,18 @@ def init_db():
     );
     """)
 
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS Marketplace (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        uuid TEXT NOT NULL,
+        card_name TEXT NOT NULL,
+        rarity TEXT NOT NULL,
+        price INTEGER NOT NULL,
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY(uuid) REFERENCES Users(uuid)
+    );
+    """)
+
     # Seed default packs if table is empty
     cursor.execute("SELECT COUNT(*) as count FROM Packs")
     if cursor.fetchone()['count'] == 0:
@@ -692,7 +704,7 @@ def querey_marketplace(ammount:int = 10, card_names: list[str] = None, rarities:
     conn = get_db_connection()
     cursor = conn.cursor()
     try:
-        sql = "SELECT id, seller_uuid, card_name, rarity, price, created_at FROM Marketplace"
+        sql = "SELECT id, uuid, card_name, rarity, price FROM Marketplace"
         clauses = []
         params = []
 
@@ -717,7 +729,7 @@ def querey_marketplace(ammount:int = 10, card_names: list[str] = None, rarities:
         if clauses:
             sql += " WHERE " + " AND ".join(clauses)
 
-        sql += " ORDER BY price ASC, created_at DESC LIMIT ?"
+        sql += " ORDER BY price ASC LIMIT ?"
         params.append(ammount)
 
         cursor.execute(sql, params)
@@ -730,21 +742,18 @@ def querey_marketplace(ammount:int = 10, card_names: list[str] = None, rarities:
         conn.close()
 
 
-def add_to_marketplace(user_uuid: str, card_name: list[str] = None, rarity: list[str] = None, price:int = None) -> bool:
-    """
-    Save a single opened card to the user's CardsOpened collection.
-    """
+def add_to_marketplace(seller_uuid: str, card_name: str, rarity: str, price: int) -> bool:
     conn = get_db_connection()
     cursor = conn.cursor()
     try:
         cursor.execute("""
             INSERT INTO Marketplace (uuid, card_name, rarity, price)
             VALUES (?, ?, ?, ?)
-        """, (user_uuid, card_name, rarity))
+        """, (seller_uuid, card_name, rarity, price))
         conn.commit()
         return True
     except Exception as e:
-        print(f"Error adding card Marketplace: {e}")
+        print(f"Error adding to Marketplace: {e}")
         return False
     finally:
         conn.close()
@@ -760,7 +769,7 @@ def remove_from_marketplace(user_uuid: str, card_name: str, rarity: str, price:i
     try:
         cursor.execute("""
             DELETE FROM Marketplace
-            WHERE seller_uuid = ? AND card_name = ? AND rarity = ? AND price = ?
+            WHERE uuid = ? AND card_name = ? AND rarity = ? AND price = ?
             LIMIT 1
         """, (user_uuid, card_name, rarity, price))
         

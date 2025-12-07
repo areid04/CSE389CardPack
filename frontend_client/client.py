@@ -185,6 +185,31 @@ class MainClient:
         response = self.session.post(url, json=payload)
         return response.json()
 
+    def list_item_for_marketplace(self, card_name: str, listing_price: int, rarity: str, email: str):
+        """List an item in the marketplace."""
+        url = f"{self.base_url}/marketplace/list"
+        payload = {
+            "card_name": card_name,
+            "rarity": rarity,
+            "price": listing_price,
+            "email": email
+        }
+        response = self.session.post(url, json=payload)
+        return response.json()
+
+    def search_marketplace(self, num_items: int, min_price: float, max_price: float, rarities: list, card_names: list):
+        """Search the marketplace for items."""
+        url = f"{self.base_url}/marketplace/search"
+        payload = {
+            "num_items": num_items,
+            "min_price": min_price,
+            "max_price": max_price,
+            "rarities": rarities,
+            "types": card_names
+        }
+        response = self.session.post(url, json=payload)
+        return response.json()
+
     def join_auction_room(self, room_id: int, on_message=None, timeout: float = 5.0):
         """Connect to an auction room websocket."""
         ws_path = f"{self.base_url}/auction/room/{room_id}?user_uuid={self.user_uuid}"
@@ -364,6 +389,100 @@ def parse_auction_command(command: str):
     
     return 'invalid', f"Unknown command: {cmd}"
 
+
+def marketplace_menu(main_client: MainClient):
+    """interaction with marketplace"""
+    while True:
+        print_border()
+        print("MARKETPLACE")
+        print_border()
+        print("1. Search Market")
+        print("2. List Item for Sale")
+        print("3. Back to Main Menu")
+        
+        choice = input("Enter choice (1-3): ")
+        
+        if choice == '1':
+            try:
+                num_items = int(input("Number of items to retrieve: "))
+                min_price = float(input("Minimum price: "))
+                max_price = float(input("Maximum price: "))
+                rarities = input("Rarities (comma-separated, leave blank for all): ").split(',')
+                card_names = input("Names (comma-separated, leave blank for all): ").split(',')
+                response = main_client.search_marketplace(
+                    num_items=num_items,
+                    min_price=min_price,
+                    max_price=max_price,
+                    rarities=[r.strip() for r in rarities if r.strip()],
+                    card_names=[t.strip() for t in card_names if t.strip()]
+                )
+                
+                if "listings" in response:
+                    print_border()
+                    print("MARKETPLACE SEARCH RESULTS")
+                    print_border()
+                    for item in response['listings']:
+                        print(f"Card_name: {item.get('card_name', 'Unknown')}")
+                        print(f"Rarity: {item.get('rarity', 'Unknown')}")
+                        print(f"Price: ${item.get('price', 0)}")
+                        #print(f"Seller: {item.get('seller_uuid', 'Unknown')}")
+                        print_border()
+                else:
+                    print(f"Error: {response}")
+                    
+            except ValueError:
+                print("Invalid input.")
+                
+        elif choice == '2':
+            # List item from inventory
+
+            # show user's cards
+
+            # select card
+            # First show user's cards
+            cards_response = main_client.get_my_cards()
+            if "cards" not in cards_response or not cards_response['cards']:
+                print("You don't have any cards to sell!")
+                continue
+                
+            print("\nYour Cards:")
+            for i, card in enumerate(cards_response['cards']):
+                print(f"{i+1}. [{card['rarity'].upper()}] {card['card_name']} x{card['qty']}")
+            
+            try:
+                card_idx = int(input("Select card number to sell: ")) - 1
+                if card_idx < 0 or card_idx >= len(cards_response['cards']):
+                    print("Invalid selection")
+                    continue
+                    
+                selected_card = cards_response['cards'][card_idx]
+                card_name = selected_card.get('card_name')  
+                card_rarity = selected_card.get('rarity')
+                print(card_name)
+                print(card_rarity)
+                
+                listing_price = int(input("Listing price: $"))
+                response = main_client.list_item_for_marketplace(
+                    card_name=card_name,
+                    listing_price=listing_price,
+                    rarity=card_rarity,
+                    email=main_client.email
+                )
+                
+                if response.get('message'):
+                    print(f"Success: {response['message']}")
+                else:
+                    print(f"Error: {response}")
+                    
+            except ValueError:
+                print("Invalid input")
+
+
+        elif choice == '3':
+            break
+        else:
+            print("Invalid choice.")
+
 def auction_room_interface(main_client: MainClient):
     """Interactive interface for auction room."""
     print_info(f"Entered auction room {main_client.current_auction_room_id}")
@@ -524,6 +643,7 @@ def trade_wait_main(main_client_instance: MainClient):
 
 def main():
     client = SignInClient(base_url="https://cardpackonline-22245509637.us-central1.run.app")
+    client = SignInClient(base_url="http://localhost:8000")
     # get user input for new user;
     # ask users to create a new account or sign in
     print_border()
@@ -575,7 +695,7 @@ def main():
     # loop on for the main client
 
     main_client = MainClient(
-        base_url="https://cardpackonline-22245509637.us-central1.run.app", 
+        base_url="http://localhost:8000", 
         logged_email=response['email']
     )
     # Set the UUID from the login response
@@ -589,7 +709,8 @@ def main():
             '4': 'View My Cards',
             '5': 'View My Packs',
             '6': 'Auction House',
-            '7': 'Exit'
+            '7': 'Marketplace',
+            '8': 'Exit'
         }
         print("\nOptions:")
         for key, value in switch_case.items():
@@ -757,6 +878,8 @@ def main():
             case '6':
                 auction_house_menu(main_client)
             case '7':
+                marketplace_menu(main_client)
+            case '8':
                 print("Goodbye!")
                 exit(0)
 if __name__ == "__main__":

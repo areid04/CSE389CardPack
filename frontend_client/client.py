@@ -523,7 +523,7 @@ def trade_wait_main(main_client_instance: MainClient):
             print_info("Unknown command. Please use 'chat <message>' or 'exit'.")
 
 def main():
-    client = SignInClient(base_url="http://localhost:8000")
+    client = SignInClient(base_url="https://cardpackonline-22245509637.us-central1.run.app")
     # get user input for new user;
     # ask users to create a new account or sign in
     print_border()
@@ -575,7 +575,7 @@ def main():
     # loop on for the main client
 
     main_client = MainClient(
-        base_url="http://localhost:8000", 
+        base_url="https://cardpackonline-22245509637.us-central1.run.app", 
         logged_email=response['email']
     )
     # Set the UUID from the login response

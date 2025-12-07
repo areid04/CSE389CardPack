@@ -317,7 +317,7 @@ def select_card_by_name(user_uuid: str, card_name:str):
     finally:
         conn.close()
 
-from ..card_utils.card import Card
+from card_utils.card import Card
 
 
 # swap hands basically
@@ -392,7 +392,7 @@ def non_negative_check(ammount: int, account_uuid: str):
 #   3. at midnight, uuids_logged... = set()
 #   4. wait until next midnight, repeat.
 
-def querey_marketplace(card_names: list[str] = None, rarities: list[str] = None, price_min: int, price_max: int, ammount:int = 10):
+def querey_marketplace(ammount:int = 10, card_names: list[str] = None, rarities: list[str] = None, price_min: int = None, price_max: int = None):
 
     # take from the Marketplace table
     conn = get_db_connection()  
@@ -438,7 +438,7 @@ def querey_marketplace(card_names: list[str] = None, rarities: list[str] = None,
         conn.close()
 
 
-def add_to_marketplace(user_uuid: str, card_name: list[str] = None, rarity: list[str] = None, price: int):
+def add_to_marketplace(user_uuid: str, card_name: list[str] = None, rarity: list[str] = None, price:int = None) -> bool:
     """
     Save a single opened card to the user's CardsOpened collection.
     """

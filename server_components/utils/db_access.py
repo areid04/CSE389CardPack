@@ -341,6 +341,7 @@ def select_card_by_name(user_uuid: str, card_name:str):
     finally:
         conn.close()
 
+from card_utils.card import Card
 
 # swap hands basically
 def change_card_ownership(seller_uuid: str, buyer_uuid: str, card: "Card"):
@@ -613,3 +614,92 @@ def non_negative_check(ammount: int, account_uuid: str):
 #   2. sleep until midnight (that found time)
 #   3. at midnight, uuids_logged... = set()
 #   4. wait until next midnight, repeat.
+
+def querey_marketplace(ammount:int = 10, card_names: list[str] = None, rarities: list[str] = None, price_min: int = None, price_max: int = None):
+
+    # take from the Marketplace table
+    conn = get_db_connection()  
+    cursor = conn.cursor()
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        sql = "SELECT id, seller_uuid, card_name, rarity, price, created_at FROM Marketplace"
+        clauses = []
+        params = []
+
+        if card_names:
+            placeholders = ",".join("?" for _ in card_names)
+            clauses.append(f"card_name IN ({placeholders})")
+            params.extend(card_names)
+
+        if rarities:
+            placeholders = ",".join("?" for _ in rarities)
+            clauses.append(f"rarity IN ({placeholders})")
+            params.extend(rarities)
+
+        if price_min is not None:
+            clauses.append("price >= ?")
+            params.append(price_min)
+
+        if price_max is not None:
+            clauses.append("price <= ?")
+            params.append(price_max)
+
+        if clauses:
+            sql += " WHERE " + " AND ".join(clauses)
+
+        sql += " ORDER BY price ASC, created_at DESC LIMIT ?"
+        params.append(ammount)
+
+        cursor.execute(sql, params)
+        rows = cursor.fetchall()
+        return [dict(r) for r in rows]
+    except Exception as e:
+        print(f"Error querying marketplace: {e}")
+        return []
+    finally:
+        conn.close()
+
+
+def add_to_marketplace(user_uuid: str, card_name: list[str] = None, rarity: list[str] = None, price:int = None) -> bool:
+    """
+    Save a single opened card to the user's CardsOpened collection.
+    """
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute("""
+            INSERT INTO Marketplace (uuid, card_name, rarity, price)
+            VALUES (?, ?, ?, ?)
+        """, (user_uuid, card_name, rarity))
+        conn.commit()
+        return True
+    except Exception as e:
+        print(f"Error adding card Marketplace: {e}")
+        return False
+    finally:
+        conn.close()
+
+
+def remove_from_marketplace(user_uuid: str, card_name: str, rarity: str, price:int) -> bool:
+    """
+    Remove a listing from the marketplace by card_name and rarity owned by user_uuid.
+    Removes the first matching listing.
+    """
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute("""
+            DELETE FROM Marketplace
+            WHERE seller_uuid = ? AND card_name = ? AND rarity = ? AND price = ?
+            LIMIT 1
+        """, (user_uuid, card_name, rarity, price))
+        
+        conn.commit()
+        return cursor.rowcount > 0  # True if a row was deleted
+    except Exception as e:
+        print(f"Error removing card from marketplace: {e}")
+        return False
+    finally:
+        conn.close()
+

@@ -179,6 +179,7 @@ class MainClient:
         payload = {
             "card_name": card_name,
             "seller_uuid": self.user_uuid,  
+            "starting_bid": starting_bid,
             "buyout_price": buyout_price,
             "time_limit": time_limit
         }
@@ -322,6 +323,16 @@ class MainClient:
             
         elif msg_type == 'timer_extended':
             print(f" Timer extended to {data.get('new_time', 10)} seconds!")
+
+    def send_auction_message(self, payload: dict):
+        if not self.is_in_auction_room or not self._auction_ws_app:
+             print("Not connected to auction room.")
+             return
+        
+        try:
+            self._auction_ws_app.send(json.dumps(payload))
+        except Exception as e:
+            print(f"Error sending message: {e}")
 
     def place_bid(self, amount: int):
         """Place a bid in the current auction room."""
@@ -504,7 +515,7 @@ def auction_room_interface(main_client: MainClient):
                     print(f"Error placing bid: {response['error']}")
                     
             elif command == 'status':
-                # Request status update (you could send a status request message)
+                main_client.send_auction_message({"type": "status"})
                 print("Requesting auction status...")
                 
             elif command == 'help':
@@ -695,7 +706,7 @@ def main():
     # loop on for the main client
 
     main_client = MainClient(
-        base_url="https://cse389cardpack-shy-thunder-4126.fly.dev/", 
+        base_url="https://cse389cardpack-shy-thunder-4126.fly.dev", 
         logged_email=response['email']
     )
     # Set the UUID from the login response

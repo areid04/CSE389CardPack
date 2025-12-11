@@ -767,14 +767,22 @@ def remove_from_marketplace(user_uuid: str, card_name: str, rarity: str, price:i
     conn = get_db_connection()
     cursor = conn.cursor()
     try:
+        # SQLite does not support LIMIT on DELETE, so select the id first then delete by id
         cursor.execute("""
-            DELETE FROM Marketplace
+            SELECT id FROM Marketplace
             WHERE uuid = ? AND card_name = ? AND rarity = ? AND price = ?
+            ORDER BY created_at ASC
             LIMIT 1
         """, (user_uuid, card_name, rarity, price))
-        
+
+        row = cursor.fetchone()
+        if not row:
+            return False
+
+        listing_id = row['id']
+        cursor.execute("DELETE FROM Marketplace WHERE id = ?", (listing_id,))
         conn.commit()
-        return cursor.rowcount > 0  # True if a row was deleted
+        return cursor.rowcount > 0
     except Exception as e:
         print(f"Error removing card from marketplace: {e}")
         return False

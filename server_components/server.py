@@ -443,7 +443,7 @@ class AuctionRoom:
     
     def _update_listing_name(self) -> str:
         if self.current_item:
-            return f"Auction Room {self.id} | Selling {self.current_item.card.name}"
+            return f"Auction Room {self.id} | Selling {self.current_item.card.card_name}"
         return f"Auction Room {self.id} | Open"
     
     async def connect(self, websocket: WebSocket, user_uuid: str):
@@ -481,7 +481,7 @@ class AuctionRoom:
             "type": "auction_state",
             "room_id": self.id,
             "current_item": {
-                "card_name": self.current_item.card.name if self.current_item else None,
+                "card_name": self.current_item.card.card_name if self.current_item else None,
                 #"card_id": self.current_item.card.id if self.current_item else None,
                 "seller_uuid": self.current_item.seller_uuid if self.current_item else None,
                 "buyout": self.current_item.buyout if self.current_item else None,
@@ -562,7 +562,7 @@ class AuctionRoom:
         await self.broadcast({
             "type": "auction_started",
             "item": {
-                "card_name": auction_item.card.name,
+                "card_name": auction_item.card.card_name,
                 #"card_id": auction_item.card.id,
                 "seller_uuid": auction_item.seller_uuid,
                 "starting_bid": auction_item.starting,
@@ -626,17 +626,78 @@ class AuctionRoom:
         if self.timer_task and not self.timer_task.done():
             self.timer_task.cancel()
         
-        if self.current_winning_bidder and self.current_item:
-            # Winner found - you'll implement transaction later
+        # Capture current state locally so we can reset the room immediately
+        curr_item = self.current_item
+        curr_winner = self.current_winning_bidder
+        curr_bid = self.current_bid
+
+        # Reset room so new listings can be queued/started immediately
+        self.current_item = None
+        self.room_active = False
+        self.listing_name = self._update_listing_name()
+
+        if curr_winner and curr_item:
+            # Broadcast that the auction was won
             await self.broadcast({
                 "type": "auction_won",
-                "winner": self.current_winning_bidder,
-                "final_bid": self.current_bid,
-                "item": self.current_item.card.name
+                "winner": curr_winner,
+                "final_bid": curr_bid,
+                "item": curr_item.card.card_name
             })
-            
-            # Here you would call transact() once implemented
-            
+
+            # Attempt to transfer funds from winner -> seller, then transfer card ownership
+            seller_uuid = curr_item.seller_uuid
+            winner_uuid = curr_winner
+            final_amount = int(curr_bid)
+
+            try:
+                # Local import to avoid circular imports at module level
+                from server_components.utils.db_access import exchange_money, change_card_ownership
+
+                # Winner pays seller
+                paid = exchange_money(winner_uuid, seller_uuid, final_amount)
+                if not paid:
+                    # Insufficient funds — notify participants
+                    await self.broadcast({
+                        "type": "auction_settlement_failed",
+                        "reason": "Insufficient funds from winner",
+                        "winner": winner_uuid,
+                        "seller": seller_uuid,
+                        "amount": final_amount
+                    })
+                else:
+                    # Transfer the card from seller -> winner
+                    transfer_ok = change_card_ownership(seller_uuid, winner_uuid, curr_item.card)
+                    if transfer_ok:
+                        await self.broadcast({
+                            "type": "auction_settled",
+                            "winner": winner_uuid,
+                            "seller": seller_uuid,
+                            "amount": final_amount,
+                            "card": curr_item.card.card_name
+                        })
+                    else:
+                        # If card transfer failed, refund the winner
+                        exchange_money(seller_uuid, winner_uuid, final_amount)
+                        await self.broadcast({
+                            "type": "auction_settlement_failed",
+                            "reason": "Card transfer failed; buyer refunded",
+                            "winner": winner_uuid,
+                            "seller": seller_uuid,
+                            "amount": final_amount
+                        })
+            except Exception as e:
+                # On unexpected error, attempt best-effort refund if necessary and notify
+                try:
+                    from server_components.utils.db_access import exchange_money
+                    # Attempt refund (may fail silently)
+                    exchange_money(seller_uuid, winner_uuid, final_amount)
+                except Exception:
+                    pass
+                await self.broadcast({
+                    "type": "auction_settlement_failed",
+                    "reason": f"Unexpected error during settlement: {e}"
+                })
         else:
             # No bids
             await self.broadcast({
@@ -768,6 +829,9 @@ async def websocket_auction_room(
                         "type": "bid_error",
                         "error": result["error"]
                     })
+
+            elif data["type"] == "status":
+                await room.send_current_state(user_uuid)
             
             elif data["type"] == "ping":
                 await websocket.send_json({"type": "pong"})

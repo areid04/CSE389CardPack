@@ -1,5 +1,5 @@
 # 1. Use an official Python runtime as a parent image
-FROM python:3.10-slim
+FROM python:3.11-slim
 
 # 2. Set the working directory in the container
 WORKDIR /app
@@ -18,4 +18,4 @@ COPY . .
 # Cloud Run injects the PORT environment variable.
 # We use shell form to ensure the variable expands correctly.
 # Replace 'main:app' with 'your_filename:your_app_instance_name'
-CMD exec uvicorn :app --host 0.0.0.0 --port ${PORT:-8080}
+CMD exec uvicorn server_components.server:app --host 0.0.0.0 --port ${PORT:-8080} --proxy-headers --forwarded-allow-ips "*"

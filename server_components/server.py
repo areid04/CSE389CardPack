@@ -1,4 +1,5 @@
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 import uuid
 from datetime import datetime
@@ -32,10 +33,22 @@ from server_components.utils.db_access import (
     scan_and_register_packs,
     change_money,
     exchange_money,
-    create_bank_account
+    create_bank_account,
+    querey_marketplace,
+    add_to_marketplace,
+    remove_from_marketplace,
+    select_card_by_name
 )
 
 app = FastAPI()
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # Allows all origins (unsafe for big production, perfect for this)
+    allow_credentials=True,
+    allow_methods=["*"],  # Allows all methods
+    allow_headers=["*"],  # Allows all headers
+)
 
 # startup functions
 @app.on_event("startup")
@@ -430,7 +443,7 @@ class AuctionRoom:
     
     def _update_listing_name(self) -> str:
         if self.current_item:
-            return f"Auction Room {self.id} | Selling {self.current_item.card.name}"
+            return f"Auction Room {self.id} | Selling {self.current_item.card.card_name}"
         return f"Auction Room {self.id} | Open"
     
     async def connect(self, websocket: WebSocket, user_uuid: str):
@@ -468,7 +481,7 @@ class AuctionRoom:
             "type": "auction_state",
             "room_id": self.id,
             "current_item": {
-                "card_name": self.current_item.card.name if self.current_item else None,
+                "card_name": self.current_item.card.card_name if self.current_item else None,
                 #"card_id": self.current_item.card.id if self.current_item else None,
                 "seller_uuid": self.current_item.seller_uuid if self.current_item else None,
                 "buyout": self.current_item.buyout if self.current_item else None,
@@ -549,7 +562,7 @@ class AuctionRoom:
         await self.broadcast({
             "type": "auction_started",
             "item": {
-                "card_name": auction_item.card.name,
+                "card_name": auction_item.card.card_name,
                 #"card_id": auction_item.card.id,
                 "seller_uuid": auction_item.seller_uuid,
                 "starting_bid": auction_item.starting,
@@ -613,17 +626,78 @@ class AuctionRoom:
         if self.timer_task and not self.timer_task.done():
             self.timer_task.cancel()
         
-        if self.current_winning_bidder and self.current_item:
-            # Winner found - you'll implement transaction later
+        # Capture current state locally so we can reset the room immediately
+        curr_item = self.current_item
+        curr_winner = self.current_winning_bidder
+        curr_bid = self.current_bid
+
+        # Reset room so new listings can be queued/started immediately
+        self.current_item = None
+        self.room_active = False
+        self.listing_name = self._update_listing_name()
+
+        if curr_winner and curr_item:
+            # Broadcast that the auction was won
             await self.broadcast({
                 "type": "auction_won",
-                "winner": self.current_winning_bidder,
-                "final_bid": self.current_bid,
-                "item": self.current_item.card.name
+                "winner": curr_winner,
+                "final_bid": curr_bid,
+                "item": curr_item.card.card_name
             })
-            
-            # Here you would call transact() once implemented
-            
+
+            # Attempt to transfer funds from winner -> seller, then transfer card ownership
+            seller_uuid = curr_item.seller_uuid
+            winner_uuid = curr_winner
+            final_amount = int(curr_bid)
+
+            try:
+                # Local import to avoid circular imports at module level
+                from server_components.utils.db_access import exchange_money, change_card_ownership
+
+                # Winner pays seller
+                paid = exchange_money(winner_uuid, seller_uuid, final_amount)
+                if not paid:
+                    # Insufficient funds — notify participants
+                    await self.broadcast({
+                        "type": "auction_settlement_failed",
+                        "reason": "Insufficient funds from winner",
+                        "winner": winner_uuid,
+                        "seller": seller_uuid,
+                        "amount": final_amount
+                    })
+                else:
+                    # Transfer the card from seller -> winner
+                    transfer_ok = change_card_ownership(seller_uuid, winner_uuid, curr_item.card)
+                    if transfer_ok:
+                        await self.broadcast({
+                            "type": "auction_settled",
+                            "winner": winner_uuid,
+                            "seller": seller_uuid,
+                            "amount": final_amount,
+                            "card": curr_item.card.card_name
+                        })
+                    else:
+                        # If card transfer failed, refund the winner
+                        exchange_money(seller_uuid, winner_uuid, final_amount)
+                        await self.broadcast({
+                            "type": "auction_settlement_failed",
+                            "reason": "Card transfer failed; buyer refunded",
+                            "winner": winner_uuid,
+                            "seller": seller_uuid,
+                            "amount": final_amount
+                        })
+            except Exception as e:
+                # On unexpected error, attempt best-effort refund if necessary and notify
+                try:
+                    from server_components.utils.db_access import exchange_money
+                    # Attempt refund (may fail silently)
+                    exchange_money(seller_uuid, winner_uuid, final_amount)
+                except Exception:
+                    pass
+                await self.broadcast({
+                    "type": "auction_settlement_failed",
+                    "reason": f"Unexpected error during settlement: {e}"
+                })
         else:
             # No bids
             await self.broadcast({
@@ -755,6 +829,9 @@ async def websocket_auction_room(
                         "type": "bid_error",
                         "error": result["error"]
                     })
+
+            elif data["type"] == "status":
+                await room.send_current_state(user_uuid)
             
             elif data["type"] == "ping":
                 await websocket.send_json({"type": "pong"})
@@ -763,7 +840,99 @@ async def websocket_auction_room(
         await room.disconnect(user_uuid)
 
 
-        
+class MarketListRequest(BaseModel):
+    email: str
+    card_name: str
+    rarity: str
+    price: int
+
+class MarketBuyRequest(BaseModel):
+    email: str
+    listing_id: int
+
+class MarketSearchRequest(BaseModel):
+    card_names: list[str] | None = None
+    rarities: list[str] | None = None
+    price_min: int | None = None
+    price_max: int | None = None
+    limit: int = 10
+
+
+@app.post("/marketplace/list")
+async def marketplace_list(req: MarketListRequest):
+    """List a card for sale on the marketplace."""
+    user = get_user_by_email(req.email)
+    if not user:
+        return JSONResponse(status_code=404, content={"error": "User not found"})
+    
+    # Check user owns this card
+    card = select_card_by_name(user['uuid'], req.card_name)
+    if not card or card['rarity'] != req.rarity:
+        return JSONResponse(status_code=400, content={"error": "You don't own this card"})
+    
+    if req.price <= 0:
+        return JSONResponse(status_code=400, content={"error": "Price must be positive"})
+    
+    success = add_to_marketplace(user['uuid'], req.card_name, req.rarity, req.price)
+    if success:
+        return JSONResponse(status_code=201, content={"message": "Card listed successfully"})
+    return JSONResponse(status_code=500, content={"error": "Failed to list card"})
+
+
+@app.post("/marketplace/search")
+async def marketplace_search(req: MarketSearchRequest):
+    """Search marketplace listings."""
+    listings = querey_marketplace(
+        ammount=req.limit,
+        card_names=req.card_names,
+        rarities=req.rarities,
+        price_min=req.price_min,
+        price_max=req.price_max
+    )
+    return JSONResponse(status_code=200, content={"listings": listings, "count": len(listings)})
+
+
+@app.post("/marketplace/buy")
+async def marketplace_buy(req: MarketBuyRequest):
+    """Buy a card from the marketplace."""
+    buyer = get_user_by_email(req.email)
+    if not buyer:
+        return JSONResponse(status_code=404, content={"error": "User not found"})
+    
+    # Get the listing
+    from server_components.utils.db_access import get_db_connection
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT * FROM Marketplace WHERE id = ?", (req.listing_id,))
+    listing = cursor.fetchone()
+    conn.close()
+    
+    if not listing:
+        return JSONResponse(status_code=404, content={"error": "Listing not found"})
+    
+    listing = dict(listing)
+    seller_uuid = listing['seller_uuid']
+    
+    if buyer['uuid'] == seller_uuid:
+        return JSONResponse(status_code=400, content={"error": "Cannot buy your own listing"})
+    
+    # Transfer money (buyer -> seller)
+    if not exchange_money(buyer['uuid'], seller_uuid, listing['price']):
+        return JSONResponse(status_code=400, content={"error": "Insufficient funds"})
+    
+    # Transfer card ownership
+    card = Card(listing['card_name'], listing['rarity'])
+    from server_components.utils.db_access import change_card_ownership
+    change_card_ownership(seller_uuid, buyer['uuid'], card)
+    
+    # Remove listing
+    remove_from_marketplace(seller_uuid, listing['card_name'], listing['rarity'], listing['price'])
+    
+    return JSONResponse(status_code=200, content={
+        "message": "Purchase successful",
+        "card_name": listing['card_name'],
+        "price": listing['price']
+    })  
 
 
 

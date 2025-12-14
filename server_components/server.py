@@ -12,6 +12,8 @@ import asyncio
 import json
 import uuid
 from datetime import datetime
+from server_components.utils.db_access import give_daily_login_bonus
+
 
 from pydantic import BaseModel
 
@@ -86,14 +88,22 @@ async def login_user(user: LoginUser):
         if existing_user['password'] != user.password:
             return JSONResponse(status_code=401, content={"error": "Incorrect password"})
         else:
-            return JSONResponse(status_code=200, content={
-                "message": "Login successful", 
+            # Daily login bonus
+            bonus_given = give_daily_login_bonus(existing_user['uuid'])
+            if bonus_given:
+                print(f"Daily login bonus awarded to {existing_user['username']}")
+                
+            response_content = {
+                "message": "Login successful",
                 "uuid": existing_user['uuid'],
                 "username": existing_user['username'],
-                "email": existing_user['email']
-            })
+                "email": existing_user['email'],
+                "daily_bonus": bonus_given
+            }
+            if bonus_given:
+                response_content["bonus_amount"] = 100
+        return JSONResponse(status_code=200, content=response_content)
 
-# Add this near the top of server.py with other imports/constants
 STARTING_BALANCE = 100
 
 @app.post("/signup")

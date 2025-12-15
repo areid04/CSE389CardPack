@@ -7,6 +7,11 @@ import websocket
 from utils.pretty_display import print_info, print_border, print_startup_message
 from utils.animations import animate_pack_opening
 
+# Frontend CLI client helpers
+# This module provides a thin synchronous client for interacting with the
+# FastAPI server. WebSocket connections are handled via background threads
+# (using websocket-client) so the CLI remains responsive.
+
 class SignInClient:
     def __init__(self, base_url: str):
         self.base_url = base_url
@@ -138,7 +143,8 @@ class MainClient:
         )
 
         def _run():
-            # run_forever blocks; run in background thread
+            # run_forever blocks; run in background thread. Any incoming
+            # messages will be dispatched to `_on_message` above.
             try:
                 self._ws_app.run_forever()
             except Exception as e:
@@ -231,6 +237,8 @@ class MainClient:
 
     def join_auction_room(self, room_id: int, on_message=None, timeout: float = 5.0):
         """Connect to an auction room websocket."""
+        # Connects to a specific auction room and routes incoming JSON
+        # messages to `_handle_auction_message` (or a user-provided handler).
         ws_path = f"{self.base_url}/auction/room/{room_id}?user_uuid={self.user_uuid}"
         ws_url = self._to_ws_url(ws_path)
         
@@ -736,8 +744,8 @@ def bank_menu(main_client: MainClient):
             print("Invalid choice.")
 
 def main():
-    #client = SignInClient(base_url="https://cse389cardpack-shy-thunder-4126.fly.dev/")
-    client = SignInClient(base_url="http://localhost:8000")
+    client = SignInClient(base_url="https://cse389cardpack-shy-thunder-4126.fly.dev/")
+    #client = SignInClient(base_url="http://localhost:8000")
     # get user input for new user;
     # ask users to create a new account or sign in
     print_border()
@@ -789,8 +797,8 @@ def main():
     # loop on for the main client
 
     main_client = MainClient(
-        #base_url="https://cse389cardpack-shy-thunder-4126.fly.dev", 
-        base_url="http://localhost:8000", 
+        base_url="https://cse389cardpack-shy-thunder-4126.fly.dev", 
+        #base_url="http://localhost:8000", 
         logged_email=response['email']
     )
     # Set the UUID from the login response

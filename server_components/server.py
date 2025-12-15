@@ -821,6 +821,9 @@ class BidMessage:
     timestamp: datetime
 
 class AuctionRoom:
+    # AuctionRoom manages a simple in-memory FIFO auction queue. Each room
+    # holds a queue of AuctionItem objects, runs a countdown for the active
+    # item, collects bids, and settles the winner when time expires.
     def __init__(self, assigned_id: int):
         self.auc_list = deque([])
         self.id = assigned_id
@@ -1536,6 +1539,8 @@ class MarketSearchRequest(BaseModel):
 @app.post("/marketplace/list")
 async def marketplace_list(req: MarketListRequest):
     """List a card for sale on the marketplace."""
+    # Endpoint: validate ownership then insert a marketplace row. This is a
+    # convenience listing model (no reservation of a specific card row).
 
     #log code
     marketplace_logger.info(
@@ -1610,6 +1615,7 @@ async def marketplace_list(req: MarketListRequest):
 @app.post("/marketplace/search")
 async def marketplace_search(req: MarketSearchRequest):
     """Search marketplace listings."""
+    # Simple search wrapper around DB helper; returns listing rows.
 
     #log code
     marketplace_logger.info(
@@ -1641,6 +1647,9 @@ async def marketplace_search(req: MarketSearchRequest):
 @app.post("/marketplace/buy")
 async def marketplace_buy(req: MarketBuyRequest):
     """Buy a card from the marketplace."""
+    # Buy flow (minimal): 1) get listing, 2) transfer money, 3) transfer one
+    # matching card from seller -> buyer, 4) remove the listing. This approach
+    # transfers the first matching card instance
 
     #log code
     marketplace_logger.info(

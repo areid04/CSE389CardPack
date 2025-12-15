@@ -49,6 +49,8 @@ class CardPack:
 
         :return: The selected card name (string).
         """
+        # Use a uniform random float and walk the cumulative distribution.
+        # This is simple and deterministic enough for quick prototyping.
         rand_value = random.random()
         cumulative = 0.0
         for card_name, info in self._distribution.items():
@@ -65,6 +67,7 @@ class CardPack:
         entry provided a `rarity` it will be used; otherwise the rarity will be
         set to `'common'` by default.
         """
+        # Returns a list of `Card` instances. Caller can persist these via DB helpers.
         opened_cards = []
         for _ in range(self.total_cards):
             card_name = self.__prob_helper()

@@ -15,6 +15,10 @@ def get_db_connection():
     conn.row_factory = sqlite3.Row  # Allows accessing columns by name
     return conn
 
+# NOTE: This module contains thin wrappers around SQLite operations used by
+# the server. Functions intentionally keep SQL local and return Python dicts
+# so the higher-level server code can remain simple and testable.
+
 def init_db():
     """
     """
@@ -721,8 +725,9 @@ def reset_daily_logins():
 reset_daily_logins()
 
 def querey_marketplace(ammount:int = 10, card_names: list[str] = None, rarities: list[str] = None, price_min: int = None, price_max: int = None):
-
-    # take from the Marketplace table
+    # Query marketplace listings with optional filters. Returns up to `ammount` rows.
+    # Note: function name `querey_marketplace` preserves existing API though
+    # it is misspelled; consider renaming later and updating callers.
     conn = get_db_connection()  
     cursor = conn.cursor()
     conn = get_db_connection()
@@ -788,6 +793,7 @@ def remove_from_marketplace(user_uuid: str, card_name: str, rarity: str, price:i
     Remove a listing from the marketplace by card_name and rarity owned by user_uuid.
     Removes the first matching listing.
     """
+    # Select-by-id then delete to avoid SQLite's lack of DELETE ... LIMIT
     conn = get_db_connection()
     cursor = conn.cursor()
     try:

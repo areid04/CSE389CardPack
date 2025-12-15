@@ -1,0 +1,12 @@
+{
+    "pack_name": "Running Shoes Pack Vol 1",
+    "card_distribution": {
+        "Nike Pegasus": {"prob": 0.40, "rarity": "common"},
+        "Adidas Ultraboost": {"prob": 0.30, "rarity": "common"},
+        "ASICS Gel-Kayano": {"prob": 0.15, "rarity": "rare"},
+        "New Balance Fresh Foam 1080": {"prob": 0.10, "rarity": "rare"},
+        "Nike Vaporfly Next%": {"prob": 0.04, "rarity": "epic"},
+        "Nike Alphafly Elite": {"prob": 0.01, "rarity": "legendary"}
+    },
+    "total_cards": 5
+}

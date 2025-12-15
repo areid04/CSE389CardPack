@@ -726,8 +726,6 @@ reset_daily_logins()
 
 def querey_marketplace(ammount:int = 10, card_names: list[str] = None, rarities: list[str] = None, price_min: int = None, price_max: int = None):
     # Query marketplace listings with optional filters. Returns up to `ammount` rows.
-    # Note: function name `querey_marketplace` preserves existing API though
-    # it is misspelled; consider renaming later and updating callers.
     conn = get_db_connection()  
     cursor = conn.cursor()
     conn = get_db_connection()

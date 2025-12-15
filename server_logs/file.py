@@ -1,14 +1,22 @@
 from server_logs.base import Logger
 from datetime import datetime
+import json
 
 class FileLogger(Logger):
-    def __init__(self, path="logs/server.log"):
-        self.path = path
+    def __init__(self, log_type="server", base_path="logs"):
+        self.log_type = log_type
+        self.path = f"{base_path}/{log_type}.log"
 
     def _write(self, level, msg, data):
         ts = datetime.utcnow().isoformat()
         with open(self.path, "a") as f:
-            f.write(f"[{ts}] {level} {msg} {data}\n")
+            f.write(json.dumps({
+                "ts": ts,
+                "log_type": self.log_type,
+                "level": level,
+                "event": msg,
+                **data
+            }) + "\n")
 
     def info(self, msg, **data):
         self._write("INFO", msg, data)

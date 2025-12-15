@@ -5,6 +5,7 @@ import time
 import asyncio
 import websocket
 from utils.pretty_display import print_info, print_border, print_startup_message
+from utils.animations import animate_pack_opening
 
 class SignInClient:
     def __init__(self, base_url: str):
@@ -831,25 +832,19 @@ def main():
                         if 1 <= pack_idx <= len(page_packs):
                             selected_pack = page_packs[pack_idx - 1]['pack_name']
                             response = main_client.open_pack(selected_pack)
-
-                            # card_pack_animation
-
-
-                            # move along the terminal
-
-                            :
                             
                             if "error" in response:
                                 print(f"Error: {response['error']}")
                                 break
                             elif "cards" in response:
                                 print_border()
-                                print(f"Opened {response.get('pack_name', 'Pack')}! You got:")
+                                print(f"Opening {response.get('pack_name', 'Pack')}...")
                                 print_border()
-                                for card in response['cards']:
-                                    rarity_tag = f"[{card['rarity'].upper()}]"
-                                    print(f"  {rarity_tag} {card['card_name']}")
-                                print_border()
+                                print()
+                                
+                                # Run the animation
+                                animate_pack_opening(response['cards'], terminal_width=50)
+                                
                             else:
                                 print(f"Response: {response}")
                             break

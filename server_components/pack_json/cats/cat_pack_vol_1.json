@@ -1,0 +1,13 @@
+{
+    "pack_name": "Cat Pack Vol 1",
+    "card_distribution": {
+        "Fat Cat": {"prob": 0.20, "rarity": "common"},
+        "Orange Cat": {"prob": 0.20, "rarity": "common"},
+        "Nyan Cat": {"prob": 0.20, "rarity": "common"},
+        "Lasagna Cat": {"prob": 0.20, "rarity": "common"},
+        "Bodega Cat": {"prob": 0.8, "rarity": "rare"},
+        "Ugly Cat": {"prob": 0.08, "rarity": "rare"},
+        "Alex Cat": {"prob": 0.04, "rarity": "legendary"}
+    },
+    "total_cards": 8
+}

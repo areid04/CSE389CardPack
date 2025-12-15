@@ -4,7 +4,6 @@ from fastapi.responses import JSONResponse
 import uuid
 from datetime import datetime
 from server_components.card_utils.card import Card
-#from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from dataclasses import dataclass, field
 from collections import deque
 from typing import Dict, Optional, Set
@@ -21,7 +20,7 @@ from pydantic import BaseModel
 from server_logs.loggers import server_logger, auction_logger, marketplace_logger
 from server_logs.endpoints import router as logs_router
 from server_logs.middleware import RequestLoggingMiddleware
-from server_logs.loggers import server_logger
+from server_logs.loggers import server_logger, transaction_logger
 
 # import dataclasses
 from server_components.server_classes import CreateUser, LoginUser, Email, OpenPackRequest, AddPackRequest
@@ -1680,7 +1679,7 @@ async def marketplace_buy(req: MarketBuyRequest):
         return JSONResponse(status_code=404, content={"error": "Listing not found"})
     
     listing = dict(listing)
-    seller_uuid = listing['seller_uuid']
+    seller_uuid = listing['uuid']
     
     if buyer['uuid'] == seller_uuid:
 
@@ -1715,13 +1714,15 @@ async def marketplace_buy(req: MarketBuyRequest):
     remove_from_marketplace(seller_uuid, listing['card_name'], listing['rarity'], listing['price'])
     
     #log code
-    marketplace_logger.info(
-        "marketplace_buy_success",
+    transaction_logger.info(
+        "marketplace_purchase",
         buyer_uuid=buyer["uuid"],
+        buyer_email=req.email,
         seller_uuid=seller_uuid,
         card_name=listing["card_name"],
         rarity=listing["rarity"],
-        price=listing["price"]
+        price=listing["price"],
+        listing_id=req.listing_id
     )
 
     return JSONResponse(status_code=200, content={

@@ -154,6 +154,13 @@ class MainClient:
 
         return {'connected': self.is_in_waiting_room}
 
+    def get_balance(self):
+        """Get current user's balance."""
+        url = f"{self.base_url}/debug/get_balance"
+        payload = {"email": self.email}
+        response = self.session.post(url, json=payload)
+        return response.json()
+
     def send_trade_message(self, message: str):
         if not self.is_in_waiting_room or not self._ws_app:
             print_info("You are not in the trade waiting room.")
@@ -183,6 +190,16 @@ class MainClient:
             "starting_bid": starting_bid,
             "buyout_price": buyout_price,
             "time_limit": time_limit
+        }
+        response = self.session.post(url, json=payload)
+        return response.json()
+
+    def buy_from_marketplace(self, listing_id: int):
+        """Buy an item from the marketplace."""
+        url = f"{self.base_url}/marketplace/buy"
+        payload = {
+            "email": self.email,
+            "listing_id": listing_id
         }
         response = self.session.post(url, json=payload)
         return response.json()
@@ -410,10 +427,11 @@ def marketplace_menu(main_client: MainClient):
         print_border()
         print("1. Search Market")
         print("2. List Item for Sale")
-        print("3. Back to Main Menu")
-        
-        choice = input("Enter choice (1-3): ")
-        
+        print("3. Buy Item")
+        print("4. Back to Main Menu")
+
+        choice = input("Enter choice (1-4): ")
+
         if choice == '1':
             try:
                 num_items = int(input("Number of items to retrieve: "))
@@ -489,8 +507,65 @@ def marketplace_menu(main_client: MainClient):
             except ValueError:
                 print("Invalid input")
 
-
         elif choice == '3':
+            # Buy item - first search to show available items
+            try:
+                print("Search for items to buy:")
+                num_items = int(input("Number of items to show (default 10): ") or 10)
+                min_price = float(input("Minimum price (default 0): ") or 0)
+                max_price = float(input("Maximum price (default 999999): ") or 999999)
+                
+                response = main_client.search_marketplace(
+                    num_items=num_items,
+                    min_price=min_price,
+                    max_price=max_price,
+                    rarities=[],
+                    card_names=[]
+                )
+                
+                if "listings" not in response or not response['listings']:
+                    print("No listings found.")
+                    continue
+                
+                listings = response['listings']
+                print_border()
+                print("AVAILABLE LISTINGS")
+                print_border()
+                for i, item in enumerate(listings, start=1):
+                    print(f"  {i}. [{item.get('rarity', '?').upper()}] {item.get('card_name', 'Unknown')} - ${item.get('price', 0)} (ID: {item.get('id', 'N/A')})")
+                print_border()
+                
+                selection = input(f"Enter 1-{len(listings)} to buy, or 0 to cancel: ")
+                idx = int(selection)
+                
+                if idx == 0:
+                    continue
+                if 1 <= idx <= len(listings):
+                    selected_listing = listings[idx - 1]
+                    listing_id = selected_listing.get('id')
+                    
+                    if listing_id is None:
+                        print("Error: Listing ID not found")
+                        continue
+                    
+                    # Confirm purchase
+                    confirm = input(f"Buy [{selected_listing.get('rarity', '?').upper()}] {selected_listing.get('card_name')} for ${selected_listing.get('price')}? (y/n): ")
+                    if confirm.lower() != 'y':
+                        print("Purchase cancelled.")
+                        continue
+                    
+                    buy_response = main_client.buy_from_marketplace(listing_id)
+                    if buy_response.get('message'):
+                        print(f"Success: {buy_response['message']}")
+                        print(f"You bought: {buy_response.get('card_name')} for ${buy_response.get('price')}")
+                    else:
+                        print(f"Error: {buy_response.get('error', 'Unknown error')}")
+                else:
+                    print("Invalid selection.")
+                    
+            except ValueError:
+                print("Invalid input.")
+        elif choice == '4':
             break
         else:
             print("Invalid choice.")
@@ -634,28 +709,35 @@ def auction_house_menu(main_client: MainClient):
         else:
             print("Invalid choice")
 
-def trade_wait_main(main_client_instance: MainClient):
-    print_info("Entered trade waiting room. You can send your commands now!")
-    print_info("Type 'exit' to leave the trade waiting room.")
-    print_info("Type chat, followed by your message to chat.")
+def bank_menu(main_client: MainClient):
+    """Bank/balance management menu."""
     while True:
-        # stall on input:
-        message = None
-        message = input("Enter message to send in trade waiting room (or 'exit' to quit): ")
-        command, args = parse_twr_command(message)
-        if command == 'exit':
-            main_client_instance._ws_app.close()
+        print_border()
+        print("BANK")
+        print_border()
+        print("1. View Balance")
+        print("5. Back to Main Menu")
+        
+        choice = input("Enter choice (1-5): ")
+        
+        if choice == '1':
+            response = main_client.get_balance()
+            if "money" in response:
+                print_border()
+                print(f"Current Balance: ${response['money']}")
+                print_border()
+            else:
+                print(f"Error: {response.get('error', 'Unknown error')}")
+            
+                
+        elif choice == '5':
             break
-        elif command == 'chat':
-            send_response = main_client_instance.send_trade_message(args)
-            if "error" in send_response:
-                print(f"Error sending message: {send_response['error']}")
         else:
-            print_info("Unknown command. Please use 'chat <message>' or 'exit'.")
+            print("Invalid choice.")
 
 def main():
-    client = SignInClient(base_url="https://cse389cardpack-shy-thunder-4126.fly.dev/")
-    #client = SignInClient(base_url="http://localhost:8000")
+    #client = SignInClient(base_url="https://cse389cardpack-shy-thunder-4126.fly.dev/")
+    client = SignInClient(base_url="http://localhost:8000")
     # get user input for new user;
     # ask users to create a new account or sign in
     print_border()
@@ -707,7 +789,8 @@ def main():
     # loop on for the main client
 
     main_client = MainClient(
-        base_url="https://cse389cardpack-shy-thunder-4126.fly.dev", 
+        #base_url="https://cse389cardpack-shy-thunder-4126.fly.dev", 
+        base_url="http://localhost:8000", 
         logged_email=response['email']
     )
     # Set the UUID from the login response
@@ -716,7 +799,7 @@ def main():
         # give us selection of options
         switch_case = {
             '1': 'Generate Card Pack (debug simple)',
-            '2': 'Join Trade Waiting Room',
+            '2': 'Banking',
             '3': 'Open Card Pack',
             '4': 'View My Cards',
             '5': 'View My Packs',
@@ -771,12 +854,7 @@ def main():
                 except ValueError:
                     print("Invalid input.")
             case '2':
-                join_response = main_client.join_trade_waiting_room()
-                if join_response.get("connected"):
-                    print("Joined trade waiting room successfully.")
-                    trade_wait_main(main_client)
-                else:
-                    print("Failed to join trade waiting room.")
+                bank_menu(main_client)
             case '3':
                 # Show user's pack inventory and let them choose which to open
                 packs_response = main_client.get_my_packs()

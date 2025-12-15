@@ -212,6 +212,8 @@ When running the server locally, interactive API documentation is available at:
 - Swagger UI: `http://localhost:8000/docs`
 - ReDoc: `http://localhost:8000/redoc`
 
+FastAPI automatically implements HEAD and OPTIONS methods for all endpoints. HEAD requests return response headers without the body, while OPTIONS requests return allowed methods and CORS headers.
+
 ## Troubleshooting
 
 **"Connection refused" errors:**

@@ -20,11 +20,21 @@ After installation, restart your terminal or run `source ~/.bashrc` (Linux) / `s
 
 ## Installation
 
+Our repository and source code is located at: https://github.com/areid04/CSE389CardPack.git . The repository will be public into next year; ending on Jan 1st, 2026.
+
 Clone the repository and install dependencies:
 
 ```bash
 git clone <repository-url>
 cd <project-directory>
+uv sync
+```
+
+Using the uploaded .zip file as our submission, you do not need to clone the repository in the same way.
+
+Just unzip to a directory, and run 
+
+```bash
 uv sync
 ```
 
@@ -34,7 +44,9 @@ This will create a virtual environment and install all dependencies from `pyproj
 
 ### Using the Deployed Server (Default)
 
-The client is configured to connect to our deployed server by default. If the server appears offline or unreachable, please contact **areid04** for assistance.
+The client is configured to connect to our deployed server by default. If the server appears offline or unreachable, please contact **areid04@syr.edu** for assistance.
+
+To test our final, "production" version, you do not need to make any changes to the code, or run on localhost. (Please skip over "Running a Local Server")
 
 ### Running a Local Server
 
@@ -117,6 +129,83 @@ The marketplace allows fixed-price trading:
 
 Users receive a $100 bonus once per day upon logging in.
 
+## Admin Log API
+
+The server provides REST endpoints for viewing application logs. All log entries are stored as JSON for easy parsing.
+
+### Available Log Types
+
+| Log Type | File | Description |
+|----------|------|-------------|
+| `users` | `logs/users.log` | User authentication events (login, signup, daily bonus) |
+| `transaction` | `logs/transaction.log` | Money transfers and purchases |
+| `server` | Available only in the Fly.dev STDIO logs | General server events |
+
+### Log Endpoints
+
+**Tail (last N lines)** - Like the Unix `tail` command:
+```bash
+# Get last 50 user login/signup events (default)
+curl "http://localhost:8000/admin/logs/tail?log_type=users"
+
+# Get last 100 lines
+curl "http://localhost:8000/admin/logs/tail?log_type=users&lines=100"
+
+# Get last 100 transaction logs
+curl "http://localhost:8000/admin/logs/tail?log_type=transaction&lines=100"
+```
+
+**Head (first N lines)** - Like the Unix `head` command:
+```bash
+# Get first 50 lines (default)
+curl "http://localhost:8000/admin/logs/head?log_type=users"
+
+# Get first 100 lines
+curl "http://localhost:8000/admin/logs/head?log_type=transaction&lines=100"
+```
+
+**Search/Filter logs:**
+```bash
+# Search for failed logins
+curl "http://localhost:8000/admin/logs/search?log_type=users&level=WARNING&contains=login_failed"
+
+# Search for specific user
+curl "http://localhost:8000/admin/logs/search?log_type=users&contains=areid04@syr.edu"
+
+# Search transaction errors
+curl "http://localhost:8000/admin/logs/search?log_type=transaction&level=ERROR"
+```
+
+**List available logs:**
+```bash
+curl "http://localhost:8000/admin/logs/available"
+```
+
+**Download raw log file:**
+```bash
+# Download to local file
+curl "http://localhost:8000/admin/logs/raw/users" > users_backup.log
+curl "http://localhost:8000/admin/logs/raw/transaction" > transactions_backup.log
+```
+
+### Example Log Output
+
+User login event:
+```json
+{"ts": "2025-12-15T23:09:34.629546", "log_type": "users", "level": "INFO", "event": "login_success", "user_uuid": "abc-123", "username": "player1"}
+```
+
+Transaction event:
+```json
+{"ts": "2025-12-15T23:10:12.123456", "log_type": "transaction", "level": "INFO", "event": "marketplace_purchase", "buyer_uuid": "abc-123", "seller_uuid": "def-456", "card_name": "Fire Dragon", "price": 50}
+```
+
+Server info event STDO:
+
+INFO:     127.0.0.1:64950 - "POST /signup HTTP/1.1" 201 Created
+[2025-12-15T23:17:40.635713] [server] INFO request_started {'req_id': '78e5292d', 'method': 'GET', 'path': '/admin/logs/tail', 'client_ip': '127.0.0.1', 'user_agent': 'Mozilla/5.0 (Windows NT; Windows NT 10.0; en-US) WindowsPowerShell/5.1.26100.7462', 'origin': None, 'content_type': None}
+[2025-12-15T23:17:40.636827] [server] INFO request_completed {'req_id': '78e5292d', 'status': 200, 'duration_ms': 1.16}
+
 ## API Documentation
 
 When running the server locally, interactive API documentation is available at:
@@ -136,6 +225,10 @@ When running the server locally, interactive API documentation is available at:
 - Contact areid04 for server status
 - Switch to local server configuration as described above
 
+**No log files found:**
+- Logs are created on first write; perform a login or transaction first
+- Check that the `logs/` directory exists
+
 ## Project Structure
 
 ```
@@ -146,6 +239,9 @@ When running the server locally, interactive API documentation is available at:
 │   ├── card_utils/        # Card and pack logic
 │   └── utils/             # Database access utilities
 ├── pack_json/             # Pack definition files
-├── server_logs/           # Logging configuration
+├── logs/                  # Runtime logs (users.log, transaction.log, etc.)
+├── server_logs/           # Logging configuration and endpoints
+│   ├── loggers.py         # Logger definitions
+│   └── endpoints.py       # Log API routes
 └── pyproject.toml         # Project dependencies
 ```

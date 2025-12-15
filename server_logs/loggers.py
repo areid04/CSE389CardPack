@@ -7,5 +7,5 @@ env = os.getenv("ENV", "dev")
 server_logger = get_logger(mode=env, log_type="server")
 auction_logger = get_logger(mode=env, log_type="auction")
 marketplace_logger = get_logger(mode=env, log_type="marketplace")
-
+user_logger = FileLogger(log_type="users")
 transaction_logger = FileLogger(log_type="transactions")

@@ -1,16 +1,22 @@
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, Query, UploadFile, File, Form, HTTPException
+from fastapi.responses import PlainTextResponse
 from pathlib import Path
+from datetime import datetime
 
 router = APIRouter(prefix="/admin/logs", tags=["logs"])
 
 LOG_DIR = Path("logs")
+ALLOWED_LOG_TYPES = {"server", "auction", "marketplace", "transaction", "auth", "custom"}
 
 def get_log_path(log_type: str) -> Path:
     return LOG_DIR / f"{log_type}.log"
 
+def ensure_log_dir():
+    LOG_DIR.mkdir(exist_ok=True)
+
 @router.get("/tail")
 async def tail_logs(
-    log_type: str = Query("server", regex="^(server|auction|marketplace)$"),
+    log_type: str = Query("server", regex="^(server|auction|marketplace|transactions|users|custom)$"),
     lines: int = Query(50, le=500)
 ):
     """Get last N lines (like tail command)"""
@@ -24,7 +30,7 @@ async def tail_logs(
 
 @router.get("/head")
 async def head_logs(
-    log_type: str = Query("server", regex="^(server|auction|marketplace)$"),
+    log_type: str = Query("server", regex="^(server|auction|marketplace|transaction|custom)$"),
     lines: int = Query(50, le=500)
 ):
     """Get first N lines (like head command)"""
@@ -42,7 +48,7 @@ async def head_logs(
 
 @router.get("/search")
 async def search_logs(
-    log_type: str = Query("server", regex="^(server|auction|marketplace)$"),
+    log_type: str = Query("server", regex="^(server|auction|marketplace|transaction|custom)$"),
     level: str = None,
     contains: str = None,
     limit: int = Query(100, le=1000)
@@ -71,5 +77,24 @@ async def list_available_logs():
     if not LOG_DIR.exists():
         return {"logs": []}
     
-    logs = [f.stem for f in LOG_DIR.glob("*.log")]
+    logs = []
+    for f in LOG_DIR.glob("*.log"):
+        stat = f.stat()
+        logs.append({
+            "name": f.stem,
+            "size_bytes": stat.st_size,
+            "modified": datetime.fromtimestamp(stat.st_mtime).isoformat()
+        })
     return {"logs": logs}
+
+@router.get("/raw/{log_type}")
+async def get_raw_log(log_type: str):
+    """Get raw log file content (for piping/downloading)"""
+    if log_type not in ALLOWED_LOG_TYPES:
+        raise HTTPException(400, f"Invalid log type. Allowed: {ALLOWED_LOG_TYPES}")
+    
+    log_path = get_log_path(log_type)
+    if not log_path.exists():
+        raise HTTPException(404, f"No {log_type} log file")
+    
+    return PlainTextResponse(log_path.read_text())

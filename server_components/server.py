@@ -3,6 +3,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 import uuid
 from datetime import datetime
+import hashlib
+import secrets
 from server_components.card_utils.card import Card
 from dataclasses import dataclass, field
 from collections import deque
@@ -20,7 +22,7 @@ from pydantic import BaseModel
 from server_logs.loggers import server_logger, auction_logger, marketplace_logger
 from server_logs.endpoints import router as logs_router
 from server_logs.middleware import RequestLoggingMiddleware
-from server_logs.loggers import server_logger, transaction_logger
+from server_logs.loggers import server_logger, transaction_logger, marketplace_logger, auction_logger, user_logger
 
 # import dataclasses
 from server_components.server_classes import CreateUser, LoginUser, Email, OpenPackRequest, AddPackRequest
@@ -49,6 +51,22 @@ from server_components.utils.db_access import (
 
 app = FastAPI()
 app.include_router(logs_router)
+
+# Password hashing helpers using built-in hashlib.pbkdf2_hmac
+def hash_password(password: str) -> str:
+    """Hash a password using PBKDF2-HMAC-SHA256 with random salt."""
+    salt = secrets.token_hex(16)  # 32-char hex string (16 bytes)
+    key = hashlib.pbkdf2_hmac('sha256', password.encode('utf-8'), salt.encode('utf-8'), 100000)
+    return f"{salt}${key.hex()}"
+
+def verify_password(password: str, hashed: str) -> bool:
+    """Verify password against stored hash."""
+    try:
+        salt, key_hex = hashed.split('$')
+        key = hashlib.pbkdf2_hmac('sha256', password.encode('utf-8'), salt.encode('utf-8'), 100000)
+        return key.hex() == key_hex
+    except (ValueError, Exception):
+        return False
 
 
 app.add_middleware(
@@ -94,150 +112,148 @@ async def read_root():
 
 @app.post("/login")
 async def login_user(user: LoginUser):
-    #logs for login attempt
-    server_logger.info(
-        "login_attempt",
-        email=user.email
-    )
+    # System log + user audit log
+    server_logger.info("login_attempt", email=user.email)
+    user_logger.info("login_attempt", email=user.email)
 
-    # check that there is an email and password otherwise fail
     if not user.email or not user.password:
-
-        #log code
-        server_logger.warning(
-            "login_failed_missing_fields",
-            email=user.email
-        )
-
+        server_logger.warning("login_failed_missing_fields", email=user.email)
+        user_logger.warning("login_failed_missing_fields", email=user.email)
         return JSONResponse(status_code=400, content={"error": "Missing email or password"})
     
-    # Query the SQLite DB
     existing_user = get_user_by_email(user.email)
     
     if not existing_user:
-
-        #log code
-        server_logger.warning(
-            "login_failed_user_not_found",
-            email=user.email
-        )
+        server_logger.warning("login_failed_user_not_found", email=user.email)
+        user_logger.warning("login_failed_user_not_found", email=user.email)
         return JSONResponse(status_code=404, content={"error": "User not found"})
-    else:
-        # In production, compare hashes, not plain text
-        if existing_user['password'] != user.password:
-            
-            #log code
+    
+    # Verify password against PBKDF2 hash
+    try:
+        if not verify_password(user.password, existing_user['password']):
             server_logger.warning(
-            "login_failed_bad_password",
-            email=user.email,
-            user_uuid=existing_user["uuid"]
+                "login_failed_bad_password",
+                email=user.email,
+                user_uuid=existing_user["uuid"]
             )
-            
+            user_logger.warning(
+                "login_failed_bad_password",
+                email=user.email,
+                user_uuid=existing_user["uuid"]
+            )
             return JSONResponse(status_code=401, content={"error": "Incorrect password"})
-        else:
-            
-            #log code
-            server_logger.info(
-                "login_success",
-                user_uuid=existing_user["uuid"],
-                username=existing_user["username"]
-            )
-            # Daily login bonus
-            bonus_given = give_daily_login_bonus(existing_user['uuid'])
-            if bonus_given:
-                print(f"Daily login bonus awarded to {existing_user['username']}")
-                
-            response_content = {
-                "message": "Login successful",
-                "uuid": existing_user['uuid'],
-                "username": existing_user['username'],
-                "email": existing_user['email'],
-                "daily_bonus": bonus_given
-            }
-            if bonus_given:
-                response_content["bonus_amount"] = 100
-        return JSONResponse(status_code=200, content=response_content)
+    except Exception as e:
+        server_logger.error("login_error_during_password_check", email=user.email, error=str(e))
+        user_logger.error("login_error_during_password_check", email=user.email, error=str(e))
+        return JSONResponse(status_code=500, content={"error": "Authentication error"})
+    
+    server_logger.info(
+        "login_success",
+        user_uuid=existing_user["uuid"],
+        username=existing_user["username"]
+    )
+    user_logger.info(
+        "login_success",
+        user_uuid=existing_user["uuid"],
+        username=existing_user["username"]
+    )
+    
+    # Daily login bonus
+    bonus_given = give_daily_login_bonus(existing_user['uuid'])
+    if bonus_given:
+        server_logger.info(
+            "daily_bonus_awarded",
+            user_uuid=existing_user["uuid"],
+            username=existing_user["username"],
+            amount=100
+        )
+        user_logger.info(
+            "daily_bonus_awarded",
+            user_uuid=existing_user["uuid"],
+            username=existing_user["username"],
+            amount=100
+        )
+        
+    response_content = {
+        "message": "Login successful",
+        "uuid": existing_user['uuid'],
+        "username": existing_user['username'],
+        "email": existing_user['email'],
+        "daily_bonus": bonus_given
+    }
+    if bonus_given:
+        response_content["bonus_amount"] = 100
+        
+    return JSONResponse(status_code=200, content=response_content)
+
 
 STARTING_BALANCE = 100
 
 @app.post("/signup")
 async def signup_user(user: CreateUser):
+    server_logger.info("signup_attempt", username=user.username, email=user.email)
+    user_logger.info("signup_attempt", username=user.username, email=user.email)
 
-    #log code
-    server_logger.info(
-        "signup_attempt",
-        username=user.username,
-        email=user.email
-    )
-
-    # check that there is a username, email, and password otherwise fail
     if not user.username or not user.email or not user.password:
-
-        #log code
         server_logger.warning(
             "signup_failed_missing_fields",
             username=user.username,
             email=user.email
         )
-
-        return JSONResponse(status_code=400, content={"error": "Missing username, email, or password"})
-
-    # Check if username exists in DB
-    if get_user_by_username(user.username):
-
-        #log code
-        server_logger.warning(
-            "signup_failed_username_exists",
-            username=user.username
-        )
-
-        return JSONResponse(status_code=400, content={"error": "Username already exists"})
-    
-    # Check if email exists in DB
-    if get_user_by_email(user.email):
-
-        #log code
-        server_logger.warning(
-            "signup_failed_email_exists",
+        user_logger.warning(
+            "signup_failed_missing_fields",
+            username=user.username,
             email=user.email
         )
+        return JSONResponse(status_code=400, content={"error": "Missing username, email, or password"})
 
+    if get_user_by_username(user.username):
+        server_logger.warning("signup_failed_username_exists", username=user.username)
+        user_logger.warning("signup_failed_username_exists", username=user.username)
+        return JSONResponse(status_code=400, content={"error": "Username already exists"})
+    
+    if get_user_by_email(user.email):
+        server_logger.warning("signup_failed_email_exists", email=user.email)
+        user_logger.warning("signup_failed_email_exists", email=user.email)
         return JSONResponse(status_code=400, content={"error": "Email already registered"})
 
-    # Prepare data for Users table
-    # Schema: username, uuid, email, password, is_admin (defaults to 0 in DB)
     new_uuid = str(uuid.uuid4())
+    
+    # Hash password using built-in hashlib.pbkdf2_hmac before storing
+    hashed_password = hash_password(user.password)
     
     user_data = {
         'username': user.username,
         'uuid': new_uuid,
         'email': user.email,
-        'password': user.password, # TODO: hash password before storing
+        'password': hashed_password,
         'is_admin': 0
     }
     
     success = create_user_entry(user_data)
 
     if not success:
-
-        #log code
-        server_logger.warning(
-            "signup_attempt_fail",
-            email=user.email
-        )
-
+        server_logger.error("signup_db_write_failed", email=user.email)
+        user_logger.error("signup_db_write_failed", email=user.email)
         return JSONResponse(status_code=500, content={"error": "Failed to create user"})
 
-
-    #log code (might be wrong spot?)
     server_logger.info(
         "signup_success",
         user_uuid=new_uuid,
-        username=user.username
+        username=user.username,
+        email=user.email
+    )
+    user_logger.info(
+        "signup_success",
+        user_uuid=new_uuid,
+        username=user.username,
+        email=user.email
     )
 
     # Create bank account for new user
     create_bank_account(new_uuid, STARTING_BALANCE)
+    server_logger.info("bank_account_created", user_uuid=new_uuid, starting_balance=STARTING_BALANCE)
+    user_logger.info("bank_account_created", user_uuid=new_uuid, starting_balance=STARTING_BALANCE)
 
     # Give new user a random starter pack
     import random
@@ -246,13 +262,8 @@ async def signup_user(user: CreateUser):
         pack_name = random.choice(list(available.keys()))
         pack_path = available[pack_name]
         add_pack_to_inventory(new_uuid, pack_name, pack_path)
-
-        #log code
-        server_logger.info(
-            "starter_pack_granted",
-            user_uuid=new_uuid,
-            pack_name=pack_name
-        )
+        server_logger.info("starter_pack_granted", user_uuid=new_uuid, pack_name=pack_name)
+        user_logger.info("starter_pack_granted", user_uuid=new_uuid, pack_name=pack_name)
 
     return JSONResponse(status_code=201, content={
         "message": "User created successfully", 

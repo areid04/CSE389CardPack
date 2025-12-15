@@ -2,6 +2,8 @@ import sqlite3
 from pathlib import Path
 from typing import Optional, Dict, Any, TYPE_CHECKING
 import datetime
+import threading
+import time
 
 if TYPE_CHECKING:
     from ..card_utils.card import Card
@@ -19,7 +21,7 @@ def init_db():
     if not DB_PATH.parent.exists():
         DB_PATH.parent.mkdir(parents=True)
 
-    # ADD THIS PRINT STATEMENT:
+    # Print statement
     print(f"---------> DATABASE IS LOCATED AT: {DB_PATH.resolve()} <---------") 
 
     conn = get_db_connection()
@@ -677,24 +679,46 @@ def non_negative_check(amount: int, account_uuid: str) -> bool:
     finally:
         conn.close()
 
-# another nice thing to have would be a daily-login cash bonus!
+# Keep track of users daily bonus
+uuids_logged_in_today: set[str] = set()
 
-# one way that you can achieve this is with:
+def give_daily_login_bonus(user_uuid: str, amount: int = 100) -> bool:
+    """
+    Give a daily login bonus to the user if they haven't received it yet today.
+    Returns True if bonus was given, False if already claimed today.
+    """
+    global uuids_logged_in_today
+    if user_uuid in uuids_logged_in_today:
+        return False  # Already claimed today
 
-# 1. create a set() called "uuids_logged_in_today"
+    # Give money
+    success = change_money(amount, user_uuid)
+    if success:
+        uuids_logged_in_today.add(user_uuid)
+    return success
 
-# 2. on the login endpoint in server.py, check if "logging_in_user" in uuids_logged...
+def reset_daily_logins():
+    """
+    Reset the uuids_logged_in_today set at midnight daily.
+    Runs in a background thread.
+    """
+    def reset_loop():
+        while True:
+            now = datetime.datetime.now()
+            # Calculate time until next midnight
+            next_midnight = datetime.datetime.combine(now.date() + datetime.timedelta(days=1), datetime.time.min)
+            seconds_until_midnight = (next_midnight - now).total_seconds()
+            time.sleep(seconds_until_midnight)
+            # Reset the set
+            global uuids_logged_in_today
+            uuids_logged_in_today = set()
+            print("Daily login bonus tracker reset.")
 
-# 3. if this is a daily login, send a cash bonus (100 coins / monies whatever)
+    thread = threading.Thread(target=reset_loop, daemon=True)
+    thread.start()
 
-# Update the endpoint (minimally) to make this possible
-
-# it's okay if the data does not exist after a shutdown; small project example
-
-# 4. make a background process that 1. checks time until midnight on start
-#   2. sleep until midnight (that found time)
-#   3. at midnight, uuids_logged... = set()
-#   4. wait until next midnight, repeat.
+# Start the background reset
+reset_daily_logins()
 
 def querey_marketplace(ammount:int = 10, card_names: list[str] = None, rarities: list[str] = None, price_min: int = None, price_max: int = None):
 

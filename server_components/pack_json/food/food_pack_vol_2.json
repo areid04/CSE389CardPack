@@ -1,0 +1,12 @@
+{
+    "pack_name": "Food Pack Vol 2",
+    "card_distribution": {
+        "Pasta": {"prob": 0.35, "rarity": "common"},
+        "Tacos": {"prob": 0.30, "rarity": "common"},
+        "Ramen": {"prob": 0.15, "rarity": "rare"},
+        "Lobster": {"prob": 0.10, "rarity": "rare"},
+        "Duck": {"prob": 0.07, "rarity": "epic"},
+        "Kobe Beef": {"prob": 0.03, "rarity": "legendary"}
+    },
+    "total_cards": 10
+}

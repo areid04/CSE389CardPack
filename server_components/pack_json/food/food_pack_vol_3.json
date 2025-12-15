@@ -1,0 +1,12 @@
+{
+    "pack_name": "Food Pack Vol 3 Desserts",
+    "card_distribution": {
+        "Chocolate Chip Cookie": {"prob": 0.35, "rarity": "common"},
+        "Cupcake": {"prob": 0.30, "rarity": "common"},
+        "Macaron": {"prob": 0.15, "rarity": "rare"},
+        "Tiramisu": {"prob": 0.10, "rarity": "rare"},
+        "Creme Brulee": {"prob": 0.07, "rarity": "epic"},
+        "Gold Leaf Cake": {"prob": 0.03, "rarity": "legendary"}
+    },
+    "total_cards": 10
+}

@@ -1,0 +1,12 @@
+{
+    "pack_name": "Basketball Shoes Pack Vol 1",
+    "card_distribution": {
+        "Nike Precision": {"prob": 0.40, "rarity": "common"},
+        "Adidas Harden Stepback": {"prob": 0.30, "rarity": "common"},
+        "Jordan 1 Retro": {"prob": 0.15, "rarity": "rare"},
+        "Nike LeBron Witness": {"prob": 0.10, "rarity": "rare"},
+        "Nike Kobe Protro": {"prob": 0.04, "rarity": "epic"},
+        "Air Jordan 11 Concord": {"prob": 0.01, "rarity": "legendary"}
+    },
+    "total_cards": 5
+}

@@ -1,0 +1,12 @@
+{
+    "pack_name": "Food Pack Vol 3 Desserts 2nd Edition",
+    "card_distribution": {
+        "Brownie": {"prob": 0.35, "rarity": "common"},
+        "Donut": {"prob": 0.30, "rarity": "common"},
+        "Cheesecake": {"prob": 0.15, "rarity": "rare"},
+        "Churros": {"prob": 0.10, "rarity": "rare"},
+        "Panna Cotta": {"prob": 0.07, "rarity": "epic"},
+        "Souffle": {"prob": 0.03, "rarity": "legendary"}
+    },
+    "total_cards": 10
+}

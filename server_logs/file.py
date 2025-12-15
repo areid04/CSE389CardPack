@@ -1,11 +1,15 @@
 from server_logs.base import Logger
 from datetime import datetime
+from pathlib import Path
 import json
 
 class FileLogger(Logger):
     def __init__(self, log_type="server", base_path="logs"):
         self.log_type = log_type
-        self.path = f"{base_path}/{log_type}.log"
+        self.path = Path(base_path) / f"{log_type}.log"
+        
+        # Ensure directory exists
+        self.path.parent.mkdir(parents=True, exist_ok=True)
 
     def _write(self, level, msg, data):
         ts = datetime.utcnow().isoformat()

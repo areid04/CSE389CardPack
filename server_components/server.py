@@ -17,6 +17,9 @@ from pydantic import BaseModel
 
 #logging stuff
 from server_logs.loggers import server_logger, auction_logger, marketplace_logger
+from server_logs.endpoints import router as logs_router
+from server_logs.middleware import RequestLoggingMiddleware
+from server_logs.loggers import server_logger
 
 # import dataclasses
 from server_components.server_classes import CreateUser, LoginUser, Email, OpenPackRequest, AddPackRequest
@@ -44,14 +47,18 @@ from server_components.utils.db_access import (
 )
 
 app = FastAPI()
+app.include_router(logs_router)
+
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Allows all origins (unsafe for big production, perfect for this)
+    allow_origins=["*"],  
     allow_credentials=True,
-    allow_methods=["*"],  # Allows all methods
-    allow_headers=["*"],  # Allows all headers
+    allow_methods=["*"],  
+    allow_headers=["*"],  
 )
+
+app.add_middleware(RequestLoggingMiddleware, logger=server_logger)
 
 # startup functions
 @app.on_event("startup")

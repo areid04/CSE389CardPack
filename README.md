@@ -143,6 +143,8 @@ The server provides REST endpoints for viewing application logs. All log entries
 
 ### Log Endpoints
 
+For testing the deployed endpoint, replace the url with our deployed server: https://cse389cardpack-shy-thunder-4126.fly.dev
+
 **Tail (last N lines)** - Like the Unix `tail` command:
 ```bash
 # Get last 50 user login/signup events (default)

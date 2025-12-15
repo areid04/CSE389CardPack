@@ -831,6 +831,13 @@ def main():
                         if 1 <= pack_idx <= len(page_packs):
                             selected_pack = page_packs[pack_idx - 1]['pack_name']
                             response = main_client.open_pack(selected_pack)
+
+                            # card_pack_animation
+
+
+                            # move along the terminal
+
+                            :
                             
                             if "error" in response:
                                 print(f"Error: {response['error']}")

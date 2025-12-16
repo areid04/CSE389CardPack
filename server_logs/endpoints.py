@@ -6,7 +6,7 @@ from datetime import datetime
 router = APIRouter(prefix="/admin/logs", tags=["logs"])
 
 LOG_DIR = Path("logs")
-ALLOWED_LOG_TYPES = {"server", "auction", "marketplace", "transaction", "auth", "custom"}
+ALLOWED_LOG_TYPES = {"server", "auction", "marketplace", "transactions", "users", "auth", "custom"}
 
 def get_log_path(log_type: str) -> Path:
     return LOG_DIR / f"{log_type}.log"
@@ -30,7 +30,7 @@ async def tail_logs(
 
 @router.get("/head")
 async def head_logs(
-    log_type: str = Query("server", regex="^(server|auction|marketplace|transaction|custom)$"),
+    log_type: str = Query("server", regex="^(server|auction|marketplace|transactions|users|custom)$"),
     lines: int = Query(50, le=500)
 ):
     """Get first N lines (like head command)"""
@@ -48,7 +48,7 @@ async def head_logs(
 
 @router.get("/search")
 async def search_logs(
-    log_type: str = Query("server", regex="^(server|auction|marketplace|transaction|custom)$"),
+    log_type: str = Query("server", regex="^(server|auction|marketplace|transactions|users|custom)$"),
     level: str = None,
     contains: str = None,
     limit: int = Query(100, le=1000)

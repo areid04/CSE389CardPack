@@ -27,18 +27,29 @@ Clone the repository and install dependencies:
 ```bash
 git clone <repository-url>
 cd <project-directory>
-uv sync
 ```
 
-Using the uploaded .zip file as our submission, you do not need to clone the repository in the same way.
+Using the uploaded .zip file as our submission, you do not need to clone the repository in the same way. Just unzip to a directory.
 
-Just unzip to a directory, and run 
+### Setting Up the Virtual Environment
+
+Create a virtual environment and install dependencies:
 
 ```bash
-uv sync
-```
+# Create a new virtual environment
+uv venv
 
-This will create a virtual environment and install all dependencies from `pyproject.toml`.
+# Activate the virtual environment
+# Windows (PowerShell):
+.venv\Scripts\Activate.ps1
+# Windows (Command Prompt):
+.venv\Scripts\activate.bat
+# macOS/Linux:
+source .venv/bin/activate
+
+# Install dependencies from requirements.txt
+uv pip install -r requirements.txt
+```
 
 ## Server Configuration
 
@@ -52,7 +63,7 @@ To test our final, "production" version, you do not need to make any changes to 
 
 If the deployed server is unavailable, you can run everything locally:
 
-1. **Update the client configuration** in `frontend_components/client.py`:
+1. **Update the client configuration** in `frontend_client/client.py`:
 
    Comment out the deployed URL and uncomment the localhost URL in both locations:
 
@@ -81,7 +92,7 @@ If the deployed server is unavailable, you can run everything locally:
 With the server running (either deployed or local), start the CLI client:
 
 ```bash
-uv run python frontend_components/client.py
+uv run python frontend_client/client.py
 ```
 
 ## Client Features
@@ -143,51 +154,62 @@ The server provides REST endpoints for viewing application logs. All log entries
 
 ### Log Endpoints
 
-For testing the deployed endpoint, replace the url with our deployed server: https://cse389cardpack-shy-thunder-4126.fly.dev
-
 **Tail (last N lines)** - Like the Unix `tail` command:
 ```bash
 # Get last 50 user login/signup events (default)
 curl "http://localhost:8000/admin/logs/tail?log_type=users"
+curl "https://cse389cardpack-shy-thunder-4126.fly.dev/admin/logs/tail?log_type=users"
 
 # Get last 100 lines
 curl "http://localhost:8000/admin/logs/tail?log_type=users&lines=100"
+curl "https://cse389cardpack-shy-thunder-4126.fly.dev/admin/logs/tail?log_type=users&lines=100"
 
 # Get last 100 transaction logs
 curl "http://localhost:8000/admin/logs/tail?log_type=transaction&lines=100"
+curl "https://cse389cardpack-shy-thunder-4126.fly.dev/admin/logs/tail?log_type=transaction&lines=100"
 ```
 
 **Head (first N lines)** - Like the Unix `head` command:
 ```bash
 # Get first 50 lines (default)
 curl "http://localhost:8000/admin/logs/head?log_type=users"
+curl "https://cse389cardpack-shy-thunder-4126.fly.dev/admin/logs/head?log_type=users"
 
 # Get first 100 lines
 curl "http://localhost:8000/admin/logs/head?log_type=transaction&lines=100"
+curl "https://cse389cardpack-shy-thunder-4126.fly.dev/admin/logs/head?log_type=transaction&lines=100"
 ```
 
 **Search/Filter logs:**
 ```bash
 # Search for failed logins
 curl "http://localhost:8000/admin/logs/search?log_type=users&level=WARNING&contains=login_failed"
+curl "https://cse389cardpack-shy-thunder-4126.fly.dev/admin/logs/search?log_type=users&level=WARNING&contains=login_failed"
 
 # Search for specific user
 curl "http://localhost:8000/admin/logs/search?log_type=users&contains=areid04@syr.edu"
+curl "https://cse389cardpack-shy-thunder-4126.fly.dev/admin/logs/search?log_type=users&contains=areid04@syr.edu"
 
 # Search transaction errors
 curl "http://localhost:8000/admin/logs/search?log_type=transaction&level=ERROR"
+curl "https://cse389cardpack-shy-thunder-4126.fly.dev/admin/logs/search?log_type=transaction&level=ERROR"
 ```
 
 **List available logs:**
 ```bash
 curl "http://localhost:8000/admin/logs/available"
+curl "https://cse389cardpack-shy-thunder-4126.fly.dev/admin/logs/available"
 ```
 
 **Download raw log file:**
 ```bash
 # Download to local file
 curl "http://localhost:8000/admin/logs/raw/users" > users_backup.log
-curl "http://localhost:8000/admin/logs/raw/transaction" > transactions_backup.log
+curl "https://cse389cardpack-shy-thunder-4126.fly.dev/admin/logs/raw/users" > users_backup.log
+
+curl "http://localhost:8000/admin/logs/raw/transaction" > transaction_backup.log
+curl "https://cse389cardpack-shy-thunder-4126.fly.dev/admin/logs/raw/transaction" > transaction_backup.log
+```
 ```
 
 ### Example Log Output
@@ -202,11 +224,12 @@ Transaction event:
 {"ts": "2025-12-15T23:10:12.123456", "log_type": "transaction", "level": "INFO", "event": "marketplace_purchase", "buyer_uuid": "abc-123", "seller_uuid": "def-456", "card_name": "Fire Dragon", "price": 50}
 ```
 
-Server info event STDO:
-
+Server info event STDIO:
+```
 INFO:     127.0.0.1:64950 - "POST /signup HTTP/1.1" 201 Created
 [2025-12-15T23:17:40.635713] [server] INFO request_started {'req_id': '78e5292d', 'method': 'GET', 'path': '/admin/logs/tail', 'client_ip': '127.0.0.1', 'user_agent': 'Mozilla/5.0 (Windows NT; Windows NT 10.0; en-US) WindowsPowerShell/5.1.26100.7462', 'origin': None, 'content_type': None}
 [2025-12-15T23:17:40.636827] [server] INFO request_completed {'req_id': '78e5292d', 'status': 200, 'duration_ms': 1.16}
+```
 
 ## API Documentation
 
@@ -236,7 +259,7 @@ FastAPI automatically implements HEAD and OPTIONS methods for all endpoints. HEA
 ## Project Structure
 
 ```
-├── frontend_components/
+├── frontend_client/
 │   └── client.py          # CLI client application
 ├── server_components/
 │   ├── server.py          # FastAPI server
@@ -247,5 +270,6 @@ FastAPI automatically implements HEAD and OPTIONS methods for all endpoints. HEA
 ├── server_logs/           # Logging configuration and endpoints
 │   ├── loggers.py         # Logger definitions
 │   └── endpoints.py       # Log API routes
-└── pyproject.toml         # Project dependencies
+├── requirements.txt       # Python dependencies
+└── .venv/                 # Virtual environment (created by uv venv)
 ```
